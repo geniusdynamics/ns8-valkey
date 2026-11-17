@@ -24,6 +24,7 @@ new_role = data["role"]
 current = vk.role()
 module_id = vk.env("MODULE_ID")
 envmap = {"VALKEY_MAXMEMORY_MB": str(data.get("maxmemory_mb", int(vk.env("VALKEY_MAXMEMORY_MB", "0") or 0)))}
+wanted_consistency = data.get("consistency") or vk.consistency()
 
 if new_role == "join" and current != "join":
     cid = data["cluster_id"].strip()
@@ -47,12 +48,17 @@ if new_role == "join" and current != "join":
     vk.store_ca(admitted["ca_cert"], admitted["ca_key"])
     envmap.update({"VALKEY_ROLE": "join", "VALKEY_CLUSTER_ID": cid, "VALKEY_RESET_CLUSTER": "1",
                    "VALKEY_RESET_DATA": "1", "VALKEY_RESET_REPLICA": "1",
-                   "VALKEY_ALLOW_SAME_NODE": "1" if admitted.get("allow_same_node") else "0"})
+                   "VALKEY_ALLOW_SAME_NODE": "1" if admitted.get("allow_same_node") else "0",
+                   # A cluster setting: the joining member takes the one of the cluster
+                   "VALKEY_CONSISTENCY": admitted.get("consistency") or "availability"})
 elif new_role == "initial" and current != "initial":
     vk.ensure_secrets()
     vk.ensure_ca()
-    # A new cluster identity; the data of a standalone server is kept
+    # A new cluster identity; the data of a standalone server is kept: the
+    # server claims the slots of its keys at start, the coordinator assigns
+    # the other slots
     envmap.update({"VALKEY_ROLE": "initial", "VALKEY_CLUSTER_ID": module_id, "VALKEY_RESET_CLUSTER": "1",
+                   "VALKEY_CONSISTENCY": wanted_consistency,
                    "VALKEY_RESET_REPLICA": "1",
                    "VALKEY_ALLOW_SAME_NODE": "1" if data.get("allow_same_node") else "0"})
 elif new_role == "standalone" and current in vk.CLUSTER_ROLES:
@@ -72,5 +78,11 @@ elif new_role == "standalone" and current in vk.CLUSTER_ROLES:
 elif new_role == "standalone":
     vk.ensure_secrets()
     envmap.update({"VALKEY_ROLE": "standalone", "VALKEY_CLUSTER_ID": ""})
+
+elif new_role in vk.CLUSTER_ROLES and current == new_role and wanted_consistency != vk.consistency():
+    # Cluster-wide setting changed on this member: 90cluster tells the
+    # other members, which apply it without restart
+    envmap["VALKEY_CONSISTENCY"] = wanted_consistency
+    open(".consistency-changed", "w").close()
 
 agent.mset_env(envmap)

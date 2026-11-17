@@ -13,15 +13,28 @@
 #
 
 import json
+import os
 import sys
+import agent
 import valkey_ns8 as vk
 
 event = json.load(sys.stdin)
 if not vk.is_cluster() or event.get("cluster_id") != vk.cluster_id():
     sys.exit(0)
 
+mode = event.get("consistency")
+if mode in vk.CONSISTENCY_MODES and mode != vk.consistency():
+    # Consistency mode changed on another member: apply it here, at once
+    # (CONFIG SET) and in the rendered configuration of the next start
+    agent.set_env("VALKEY_CONSISTENCY", mode)
+    os.environ["VALKEY_CONSISTENCY"] = mode
+    for proc in vk.PROCS:
+        vk.render(proc)
+    vk.apply_consistency_runtime(mode)
+    print(f"Consistency mode {mode} applied", file=sys.stderr)
+
 vk.publish_records()
-if event.get("reason") == "reconciled":
+if event.get("reason") in ("reconciled", "consistency-changed"):
     sys.exit(0)
 if vk.coordinator(vk.members()) == vk.env("MODULE_ID"):
     if vk.reconcile_local(event.get("reason") or "event"):

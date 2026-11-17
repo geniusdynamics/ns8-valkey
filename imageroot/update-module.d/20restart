@@ -25,6 +25,11 @@ if not vk.is_cluster():
     agent.run_helper("systemctl", "--user", "try-restart", *units)
     sys.exit(0)
 
+# Periodic topology check (added in a later release than some installs).
+# It skips its run while any member holds the restart lock below, so it
+# never moves slots in the middle of the rolling restart.
+agent.run_helper("systemctl", "--user", "enable", "--now", "valkey-reconcile.timer")
+
 module_id = vk.env("MODULE_ID")
 member_list = vk.members()
 client = vk.cluster_client(member_list)

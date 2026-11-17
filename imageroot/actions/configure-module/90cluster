@@ -47,6 +47,10 @@ if os.path.exists(".left-cluster"):
     if others:
         ask_reconcile(others, f"{module_id}-left")
 
+if vk.is_cluster() and os.path.exists(".consistency-changed"):
+    os.unlink(".consistency-changed")
+    vk.fire_cluster_changed("consistency-changed", consistency=vk.consistency())
+
 if vk.is_cluster():
     vk.wait_ready("main", timeout=120)
     ask_reconcile(vk.members(), f"{module_id}-configured")

@@ -21,6 +21,22 @@ Part of the [ns8-valkey documentation](../README.md).
 - **Clone** (and move) also gives a standalone server with a copy of the
   data.
 
+## Migrate a standalone server into a cluster
+
+1. Back up the source instance (any backup repository).
+2. Restore that backup on the node that will hold the initial node of the
+   cluster (*Backup*, *Restore*). The restored instance is a standalone
+   server with the data and the client users of the source.
+3. In its *Settings*, choose **Initial node of a new cluster**: it restarts
+   in cluster mode and keeps its data.
+4. Install ns8-valkey on the other nodes and join the cluster. The data is
+   spread over the members as they join.
+5. Reconfigure the consumers to use the new instance. Their credentials
+   still work: the client users came with the backup.
+
+A standalone server that already runs where the cluster should start can
+skip steps 1 and 2.
+
 ## Updates
 
 - An update is refused if the new image runs an older Valkey than the
@@ -34,6 +50,8 @@ Part of the [ns8-valkey documentation](../README.md).
   Updating all the instances at once is therefore safe; with 3 or more
   members the store stays available.
 - A standalone server restarts: clients reconnect after a short outage.
+- The periodic topology check skips its runs while a member holds the
+  rolling restart lock, so it does not move slots during an update.
 
 ## Health
 

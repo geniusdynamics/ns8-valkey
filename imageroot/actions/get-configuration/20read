@@ -32,6 +32,7 @@ json.dump({
     "cluster_id": vk.cluster_id(),
     "ha_mode": vk.ha_mode(role) if role else "",
     "maxmemory_mb": int(vk.env("VALKEY_MAXMEMORY_MB", "0") or 0),
+    "consistency": vk.consistency(),
     "allow_same_node": vk.env("VALKEY_ALLOW_SAME_NODE") == "1",
     "host": vk.local_host(),
     "port": p["main"][0],

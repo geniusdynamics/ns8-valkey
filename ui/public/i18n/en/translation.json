@@ -62,7 +62,22 @@
     "warning_no_redundancy": "Not redundant",
     "warning_no_redundancy_description": "At least one primary has no replica on another member: a member failure would stop the cluster.",
     "warning_not_running": "Valkey is not running",
-    "warning_not_running_description": "The local Valkey server does not answer. Check the system logs."
+    "warning_not_running_description": "The local Valkey server does not answer. Check the system logs.",
+    "consistency": "Consistency mode",
+    "consistency_availability": "Availability",
+    "consistency_consistency": "Consistency",
+    "reconcile_never": "Not checked yet",
+    "last_reconcile": "Last topology check",
+    "last_reconcile_at": "Last topology check: {time} ({trigger}, {changes} changes)",
+    "reconcile_result_ok": "Topology in order",
+    "reconcile_result_repaired": "Topology repaired",
+    "reconcile_result_deferred": "Check deferred: members down",
+    "reconcile_result_skipped": "Check skipped",
+    "reconcile_result_error": "Topology repair failed",
+    "warning_writes_need_replica": "Writes need the replica",
+    "warning_writes_need_replica_description": "Consistency mode with a single member: writes stop whenever its replica process is down. Add members, or use the availability mode.",
+    "warning_writes_blocked": "Writes may be refused",
+    "warning_writes_blocked_description": "Consistency mode: a primary without a replica in sync refuses writes (NOREPLICAS) until a replica catches up."
   },
   "settings": {
     "title": "Settings",
@@ -77,7 +92,7 @@
     "role_standalone": "Standalone",
     "role_standalone_description": "One Valkey server on this node. The simplest choice: other modules use it with no cluster setup.",
     "role_initial": "Initial node of a new cluster",
-    "role_initial_description": "Starts a Valkey Cluster on this node. Install ns8-valkey on other nodes and join it: with 3 or more members the cluster survives the loss of one node.",
+    "role_initial_description": "Starts a Valkey Cluster on this node. A standalone server keeps its data. Install ns8-valkey on other nodes and join it: with 3 or more members the cluster survives the loss of one node.",
     "role_join": "Join an existing cluster",
     "role_join_description": "Becomes a member of a Valkey Cluster of another node. This instance must be empty: its data is replaced by its share of the cluster data.",
     "cluster_id": "Cluster",
@@ -98,7 +113,14 @@
     "leave_cluster_first": "Leave the current cluster first: switch to standalone",
     "cluster_has_members": "Other members are still in this cluster: remove them first",
     "instance_not_empty": "This instance holds data: only an empty instance can join a cluster",
-    "not_configured": "The instance is not configured"
+    "not_configured": "The instance is not configured",
+    "consistency": "Consistency mode (whole cluster)",
+    "consistency_availability": "Availability (recommended)",
+    "consistency_availability_description": "Writes go on even when a primary has no replica in sync, and a replica always takes over a failed primary. Up to about one second of writes can be lost in a failover. Right for counters and caches, such as mail throttles.",
+    "consistency_consistency": "Consistency",
+    "consistency_consistency_description": "A primary accepts writes only while one of its replicas confirmed the data in the last 10 seconds, and a replica long out of touch does not take over. Fewer writes are lost, but writes stop while a primary has no replica in sync.",
+    "consistency_warning": "Writes depend on the replica",
+    "consistency_warning_description": "With one member, the only replica runs on the same node: writes stop whenever it is down. Add members on other nodes."
   },
   "about": {
     "title": "About"

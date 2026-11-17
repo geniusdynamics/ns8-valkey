@@ -12,7 +12,13 @@
 #
 # Warnings: below_quorum (fewer than 3 members: no automatic failover),
 # members_down, cluster_down, unreachable, no_redundancy (a primary has no
-# replica on another member), not_running.
+# replica on another member), not_running, writes_need_replica
+# (consistency mode with fewer than 2 members: writes stop whenever the
+# replica process is down), writes_blocked (consistency mode and a primary
+# without replica in sync: writes to its slots fail).
+#
+# last_reconcile: latest topology repair or check of the cluster members
+# (time, trigger, result: ok, repaired, deferred, skipped or error).
 #
 
 import json
@@ -35,6 +41,8 @@ status = {
     "processes": [],
     "warnings": [],
     "local": {},
+    "consistency": vk.consistency() if vk.is_cluster() else "availability",
+    "last_reconcile": {},
 }
 
 if role:
@@ -61,7 +69,14 @@ if role and vk.is_cluster():
         health = vk.cluster_health(vk.members())
         status.update({k: health[k] for k in ("members_count", "shards", "cluster_state", "quorum_ok",
                                               "failure_tolerance", "processes")})
-        status["warnings"] = sorted(set(status["warnings"] + health["warnings"]))
+        warnings = set(status["warnings"] + health["warnings"])
+        if status["consistency"] == "consistency":
+            if health["members_count"] < 2:
+                warnings.add("writes_need_replica")
+            if "no_redundancy" in warnings or "members_down" in warnings:
+                warnings.add("writes_blocked")
+        status["warnings"] = sorted(warnings)
+        status["last_reconcile"] = vk.last_reconcile(vk.members())
     except Exception as ex:
         vk.warning(f"Cannot read the cluster health: {type(ex).__name__}")
         status["warnings"].append("unreachable")

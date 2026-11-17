@@ -39,4 +39,5 @@ json.dump({
     "ca_cert": ca_cert,
     "ca_key": ca_key,
     "allow_same_node": allow,
+    "consistency": vk.consistency(),
 }, fp=sys.stdout)
