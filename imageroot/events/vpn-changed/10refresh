@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# The cluster VPN changed: if the VPN address of this node is not the one
+# Valkey listens on, restart with the new address (Valkey Cluster peers
+# learn it from the gossip) and publish it.
+#
+
+import json
+import sys
+import agent
+import valkey_ns8 as vk
+
+if not vk.role():
+    sys.exit(0)
+rdb = agent.redis_connect(use_replica=True)
+record = rdb.hgetall(f"module/{vk.env('MODULE_ID')}/srv/tcp/{vk.SERVICE}")
+if record.get("host") == vk.local_host():
+    sys.exit(0)
+units = ["valkey.service"] + (["valkey-replica.service"] if vk.is_cluster() else [])
+agent.run_helper("systemctl", "--user", "-T", "try-restart", *units)
+vk.publish_records()

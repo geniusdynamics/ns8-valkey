@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 
 #
-# Copyright (C) 2022 Nethesis S.r.l.
+# Copyright (C) 2026 Genius Dynamics
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-import sys
+#
+# A restored instance always comes back standalone: the backup of a
+# cluster member holds its share of the keyspace and the client users.
+# Join a cluster again from Settings if needed.
+#
+
 import json
+import sys
 import agent
 
 request = json.load(sys.stdin)
-
-original_environment = request['environment']
-
-for evar in [
-        "TRAEFIK_HOST",
-        "TRAEFIK_HTTP2HTTPS",
-    ]:
-    agent.set_env(evar, original_environment[evar])
-
-agent.dump_env()
+renv = request.get("environment", {})
+agent.mset_env({
+    "VALKEY_MAXMEMORY_MB": renv.get("VALKEY_MAXMEMORY_MB", "0"),
+    "VALKEY_ROLE": "",
+    "VALKEY_CLUSTER_ID": "",
+    "VALKEY_RESET_CLUSTER": "1",
+})

@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# A module was removed:
+# - delete its Valkey client user on the local processes (every member
+#   handles the event, so the whole cluster drops it)
+# - if it was a member of this cluster, its service records are gone: the
+#   coordinator forgets its processes, promotes its replicas if it was
+#   still serving slots, and rebalances
+#
+
+import json
+import sys
+import valkey_ns8 as vk
+
+event = json.load(sys.stdin)
+removed = event.get("module") or ""
+if not vk.role() or not removed or removed == vk.env("MODULE_ID"):
+    sys.exit(0)
+
+username = vk.client_username(removed)
+for proc in (vk.PROCS if vk.is_cluster() else ("main",)):
+    try:
+        conn = vk.local_conn(proc)
+        if int(conn.execute_command("ACL", "DELUSER", username)):
+            vk.save_acl(conn)
+            print(f"Valkey user {username} revoked on the {proc} process", file=sys.stderr)
+    except Exception as ex:
+        vk.warning(f"Cannot revoke {username} on the {proc} process: {type(ex).__name__}")
+
+if vk.is_cluster():
+    member_list = vk.members()
+    vk.publish_records()
+    if vk.coordinator(member_list) == vk.env("MODULE_ID"):
+        if vk.reconcile_local(f"{removed}-removed"):
+            vk.fire_cluster_changed("reconciled")

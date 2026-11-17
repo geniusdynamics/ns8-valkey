@@ -1,17 +1,44 @@
-#!/bin/bash
+#!/usr/bin/env python3
 
 #
-# Copyright (C) 2023 Nethesis S.r.l.
+# Copyright (C) 2026 Genius Dynamics
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-set -e
 
-# Redirect any output to the journal (stderr)
-exec 1>&2
+#
+# Start the Valkey processes. A process restarts only when its rendered
+# configuration changed, so saving the same settings does not interrupt a
+# cluster member. The environment written by the previous steps is
+# reloaded here: actions see it only in os.environ of later steps.
+#
 
-# If the control reaches this step, the service can be enabled and started
+import os
+import sys
+import agent
+import valkey_ns8 as vk
 
-touch smarthost.env
+os.environ.update(agent.read_envfile("environment"))
 
-systemctl --user enable kickstart.service
-systemctl --user restart kickstart.service
+units = ["valkey.service"]
+if vk.is_cluster():
+    units.append("valkey-replica.service")
+else:
+    agent.run_helper("systemctl", "--user", "disable", "--now", "valkey-replica.service")
+
+reset = any(vk.env(var) == "1" for var in ("VALKEY_RESET_CLUSTER", "VALKEY_RESET_DATA", "VALKEY_RESET_REPLICA"))
+for unit in units:
+    proc = "main" if unit == "valkey.service" else "replica"
+    changed = vk.render_changed(proc)
+    active = agent.run_helper("systemctl", "--user", "-q", "is-active", unit).returncode == 0
+    agent.run_helper("systemctl", "--user", "enable", unit).check_returncode()
+    if changed or reset or not active:
+        agent.run_helper("systemctl", "--user", "restart", unit).check_returncode()
+
+# The reset markers were consumed by the processes started above: a later
+# restart must keep the data and the cluster identity
+agent.munset_env(["VALKEY_RESET_CLUSTER", "VALKEY_RESET_DATA", "VALKEY_RESET_REPLICA"])
+for proc in vk.PROCS:
+    for marker in ("reset-cluster", "reset-data"):
+        path = vk.state_path(f"valkey-{proc}", marker)
+        if os.path.exists(path):
+            os.unlink(path)

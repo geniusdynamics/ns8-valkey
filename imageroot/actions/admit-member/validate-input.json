@@ -1,0 +1,14 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Admit a member",
+    "$id": "http://nethserver.org/json-schema/task/input/valkey/admit-member",
+    "description": "Called by an ns8-valkey instance that joins the cluster of this instance (role valkeypeer). Returns the cluster secrets to the caller",
+    "examples": [{"module_id": "valkey2", "node_id": "2"}],
+    "type": "object",
+    "required": ["module_id", "node_id"],
+    "additionalProperties": false,
+    "properties": {
+        "module_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*[0-9]+$"},
+        "node_id": {"type": "string", "pattern": "^[0-9]+$"}
+    }
+}

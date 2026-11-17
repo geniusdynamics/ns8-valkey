@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# A member of this cluster joined, started or left: refresh the seed list
+# of the service record; the coordinator (lowest module sequence number
+# that answers) repairs the topology. Events with reason "reconciled" only
+# refresh the record, so repairs do not trigger each other.
+#
+
+import json
+import sys
+import valkey_ns8 as vk
+
+event = json.load(sys.stdin)
+if not vk.is_cluster() or event.get("cluster_id") != vk.cluster_id():
+    sys.exit(0)
+
+vk.publish_records()
+if event.get("reason") == "reconciled":
+    sys.exit(0)
+if vk.coordinator(vk.members()) == vk.env("MODULE_ID"):
+    if vk.reconcile_local(event.get("reason") or "event"):
+        vk.fire_cluster_changed("reconciled")

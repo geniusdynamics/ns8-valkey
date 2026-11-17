@@ -1,0 +1,13 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Grant client credentials",
+    "$id": "http://nethserver.org/json-schema/task/input/valkey/grant-client",
+    "description": "Role valkeyclient (authorization valkey@any:valkeyclient). A module caller always acts on its own client ID; client_id is for administrators. See docs/integration.md",
+    "examples": [{}, {"key_prefix": "app:"}, {"client_id": "kumomta1"}],
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+        "client_id": {"type": "string", "pattern": "^([a-z][a-z0-9_.-]{0,62})?$"},
+        "key_prefix": {"type": "string", "pattern": "^[A-Za-z0-9:_.{}-]{0,64}$"}
+    }
+}

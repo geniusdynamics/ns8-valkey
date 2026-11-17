@@ -1,0 +1,23 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Valkey status",
+    "$id": "http://nethserver.org/json-schema/task/output/valkey/get-cluster-status",
+    "type": "object",
+    "required": ["configured", "role", "ha_mode", "cluster_id", "members_count", "quorum_ok", "failure_tolerance", "processes", "warnings"],
+    "properties": {
+        "configured": {"type": "boolean"},
+        "role": {"type": "string"},
+        "ha_mode": {"type": "string"},
+        "cluster_id": {"type": "string"},
+        "version": {"type": "string"},
+        "endpoint": {"type": "string"},
+        "members_count": {"type": "integer"},
+        "shards": {"type": "integer"},
+        "cluster_state": {"type": "string"},
+        "quorum_ok": {"type": "boolean"},
+        "failure_tolerance": {"type": "integer"},
+        "processes": {"type": "array"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+        "local": {"type": "object"}
+    }
+}

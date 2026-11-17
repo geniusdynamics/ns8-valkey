@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# Publish the service records and, in cluster mode, have the coordinator
+# repair the topology now (meet this member, move slots, place replicas),
+# so the action returns with the cluster formed. A member that left asks a
+# remaining member to forget it.
+#
+
+import json
+import os
+import sys
+import agent
+import agent.tasks
+import valkey_ns8 as vk
+
+os.environ.update(agent.read_envfile("environment"))
+module_id = vk.env("MODULE_ID")
+
+
+def ask_reconcile(member_list, reason):
+    coord = vk.coordinator(member_list)
+    if not coord:
+        print(agent.SD_WARNING + "No reachable member: the topology is repaired when one starts", file=sys.stderr)
+        return
+    if coord == module_id:
+        vk.reconcile_local(reason)
+        vk.fire_cluster_changed("reconciled")
+        return
+    ret = agent.tasks.run(agent_id=f"module/{coord}", action="reconcile-cluster", data={"reason": reason},
+                          extra={"isNotificationHidden": True})
+    if ret["exit_code"] != 0:
+        print(agent.SD_WARNING + f"reconcile-cluster on {coord} failed (exit code {ret['exit_code']})", file=sys.stderr)
+
+
+vk.publish_records()
+
+if os.path.exists(".left-cluster"):
+    with open(".left-cluster") as fp:
+        others = list(json.load(fp).values())
+    os.unlink(".left-cluster")
+    if others:
+        ask_reconcile(others, f"{module_id}-left")
+
+if vk.is_cluster():
+    vk.wait_ready("main", timeout=120)
+    ask_reconcile(vk.members(), f"{module_id}-configured")
+    vk.publish_records()
