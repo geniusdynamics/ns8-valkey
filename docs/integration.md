@@ -128,7 +128,9 @@ Rules:
 
 - **Every call rotates the password.** The previous password stops working
   at once on every reachable member. Store the new one before using it.
-  Calling it again is the way to recover lost or rejected credentials.
+  Calling it again is the way to recover lost or rejected credentials, so
+  call it only when needed: at first use, and when the server rejects the
+  stored credentials. This behaviour is part of the contract and stays.
 - The password has 64 hexadecimal characters: it can be put in a URL
   without escaping.
 - Store the password in a `0600` file of the consumer state, never with
@@ -247,7 +249,9 @@ supports one node or a Redis/Valkey Cluster, not Sentinel. Source:
 ```lua
 -- ha_mode "standalone"
 kumo.configure_redis_throttles {
-  node = 'redis://ns8c-kumomta1:<password>@10.5.4.1:20001',
+  node = 'redis://10.5.4.1:20001',
+  username = 'ns8c-kumomta1',
+  password = '<password>',
   connect_timeout = '5 seconds',
   response_timeout = '5 seconds',
 }
@@ -263,10 +267,13 @@ kumo.configure_redis_throttles {
 }
 ```
 
-- For one node, put the user and the password in the URL: the KumoMTA
-  documentation says the `username` and `password` fields are used only
-  for a cluster (recent source code also applies them to a single node).
-  The password is hexadecimal, so it needs no escaping.
+- Pass `username` and `password` as parameters, as ns8-kumomta does. The
+  KumoMTA source (tag 2026.09.29-b90d8bc1, `RedisConnKey::build_client`)
+  applies them to a single node too, although `docs/reference/redis/open.md`
+  still says "not used for connecting to a single node". For an older
+  KumoMTA, put them in the URL instead
+  (`redis://ns8c-kumomta1:<password>@10.5.4.1:20001`): the password is
+  hexadecimal and needs no escaping.
 - Set `cluster = true` whenever `ha_mode` is `cluster`, also with a single
   seed.
 - The default user permissions (`+@all -@admin -@dangerous`) cover what
