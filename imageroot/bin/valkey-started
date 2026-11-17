@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# ExecStartPost of valkey.service and valkey-replica.service:
+# - wait until the server answers and has loaded its data
+# - turn the append-only file back on after a start from dump.rdb alone
+#   (restore): Valkey writes a new AOF from the loaded data
+# - cluster mode: copy the client users from a peer (this member may have
+#   missed grants or revocations), then tell the members that this process
+#   is up, so the coordinator repairs the topology (fail back, replicas)
+# - publish the service records
+#
+# Usage: valkey-started main|replica
+#
+
+import sys
+import agent
+import valkey_ns8 as vk
+
+proc = sys.argv[1] if len(sys.argv) > 1 else "main"
+conn = vk.wait_ready(proc, timeout=540)
+if not conn:
+    print(agent.SD_ERR + f"Valkey {proc} process is not ready", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    if conn.config_get("appendonly").get("appendonly") == "no":
+        conn.config_set("appendonly", "yes")
+        print("Append-only file enabled again", file=sys.stderr)
+except Exception as ex:
+    vk.warning(f"Cannot check the append-only file setting: {type(ex).__name__}")
+
+if vk.is_cluster():
+    try:
+        vk.sync_acl_from_peers()
+    except Exception as ex:
+        vk.warning(f"ACL sync failed: {type(ex).__name__}")
+
+try:
+    vk.publish_records()
+    if vk.is_cluster():
+        vk.fire_cluster_changed(f"{proc}-started")
+except Exception as ex:
+    vk.warning(f"Cannot publish the service records: {ex}")

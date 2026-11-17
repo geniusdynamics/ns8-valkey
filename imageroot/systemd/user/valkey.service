@@ -1,0 +1,45 @@
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# Valkey server, main process. Host network: the server listens on
+# the node cluster VPN address and on loopback only (see valkey-prepare),
+# and Valkey Cluster announces the real address to its peers. The
+# configuration in state/valkey-main is rendered at every start; it
+# holds the replication password, so it is 0600 and never backed up.
+#
+[Unit]
+Description=Valkey server
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=%S/state/environment
+WorkingDirectory=%S/state
+Restart=always
+TimeoutStartSec=600
+TimeoutStopSec=90
+ExecStartPre=/bin/rm -f %t/%N.pid %t/%N.ctr-id
+ExecStartPre=runagent valkey-prepare main
+ExecStart=/usr/bin/podman run \
+    --detach \
+    --conmon-pidfile=%t/%N.pid \
+    --cidfile=%t/%N.ctr-id \
+    --cgroups=no-conmon \
+    --replace --name=%N \
+    --network=host \
+    --cap-drop=all \
+    --security-opt=no-new-privileges \
+    --entrypoint=/etc/valkey/start.sh \
+    --volume=valkey-data:/data:Z \
+    --volume=%S/state/valkey-main:/etc/valkey:Z \
+    ${VALKEY_IMAGE}
+ExecStartPost=runagent valkey-started main
+ExecStop=/usr/bin/podman stop --ignore --cidfile=%t/%N.ctr-id -t 75
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile=%t/%N.ctr-id
+PIDFile=%t/%N.pid
+Type=forking
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Client users of Valkey: IDs, user names and key prefixes. No secrets:
+# readers can run it.
+
+import json
+import sys
+import valkey_ns8 as vk
+
+clients = []
+if vk.role():
+    try:
+        clients = vk.list_clients(vk.local_conn("main"))
+    except Exception as ex:
+        vk.warning(f"Cannot read the Valkey users: {type(ex).__name__}")
+json.dump({"clients": clients}, fp=sys.stdout)

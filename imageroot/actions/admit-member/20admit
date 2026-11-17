@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# An ns8-valkey instance joins the cluster of this instance. Role
+# valkeypeer (authorization valkey@any:valkeypeer): not open to readers.
+# The output carries the cluster secrets (admin and replication passwords,
+# CA of the cluster bus) to the calling instance only; it is never logged.
+#
+
+import json
+import sys
+import valkey_ns8 as vk
+
+data = json.load(sys.stdin)
+caller = vk.caller_module()
+if caller and caller != data["module_id"]:
+    vk.validation_error("module_id", data["module_id"], "module_id_mismatch")
+if not vk.is_cluster():
+    vk.validation_error("module_id", data["module_id"], "not_a_cluster_member")
+
+records = vk.cluster_records(wanted=vk.cluster_id())
+allow = vk.env("VALKEY_ALLOW_SAME_NODE") == "1"
+for module_id, rec in records.items():
+    if module_id != data["module_id"] and str(rec.get("node")) == data["node_id"] and not allow:
+        vk.validation_error("node_id", data["node_id"], "node_already_member")
+
+secrets = vk.read_secrets()
+ca_cert, ca_key = vk.ensure_ca()
+print(f"Admitting {data['module_id']} (node {data['node_id']}) to cluster {vk.cluster_id()}", file=sys.stderr)
+json.dump({
+    "cluster_id": vk.cluster_id(),
+    "admin_password": secrets["VALKEY_ADMIN_PASSWORD"],
+    "repl_password": secrets["VALKEY_REPL_PASSWORD"],
+    "ca_cert": ca_cert,
+    "ca_key": ca_key,
+    "allow_same_node": allow,
+}, fp=sys.stdout)

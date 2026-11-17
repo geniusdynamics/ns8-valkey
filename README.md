@@ -1,172 +1,110 @@
-# ns8-kickstart
+# ns8-valkey
 
-This is a template module for [NethServer 8](https://github.com/NethServer/ns8-core).
-To start a new module from it:
+[Valkey](https://valkey.io/) key-value store for other NethServer 8
+modules, as a standalone server or as a highly available
+[Valkey Cluster](https://valkey.io/topics/cluster-tutorial/) spread over the
+nodes of the NethServer cluster.
 
-1. Click on [Use this template](https://github.com/NethServer/ns8-kickstart/generate).
-   Name your repo with `ns8-` prefix (e.g. `ns8-mymodule`). 
-   Do not end your module name with a number, like ~~`ns8-baaad2`~~!
+- **Standalone**: one server, nothing to know about clustering.
+- **Cluster**: install one instance per node; the first one is the
+  *initial node*, the others *join* it. With 3 or more members the store
+  survives the loss of any one node.
+- Consumer modules get their own Valkey user from a guarded action;
+  passwords never go through the cluster Redis keys.
 
-1. Clone the repository, enter the cloned directory and
-   [configure your GIT identity](https://git-scm.com/book/en/v2/Getting-Started-First-Time-Git-Setup#_your_identity)
+Documentation:
 
-1. Rename some references inside the repo:
-   ```
-   modulename=$(basename $(pwd) | sed 's/^ns8-//') &&
-   git mv imageroot/systemd/user/kickstart.service imageroot/systemd/user/${modulename}.service &&
-   git mv imageroot/systemd/user/kickstart-app.service imageroot/systemd/user/${modulename}-app.service && 
-   git mv tests/kickstart.robot tests/${modulename}.robot &&
-   sed -i "s/kickstart/${modulename}/g" $(find .github/ * -type f) &&
-   git commit -a -m "Repository initialization"
-   ```
-
-1. Edit this `README.md` file, by replacing this section with your module
-   description
-
-1. Adjust `.github/workflows` to your needs. `clean-registry.yml` might
-   need the proper list of image names to work correctly. Unused workflows
-   can be disabled from the GitHub Actions interface.
-
-1. Commit and push your local changes
+- [Consumer integration](docs/integration.md): the contract for modules
+  that use Valkey (discovery, `grant-client`, events, HA modes, KumoMTA)
+- [High availability](docs/high-availability.md): design, failure
+  behaviour, membership, upgrades
+- [Operations](docs/operations.md): backup and restore, updates,
+  troubleshooting
 
 ## Install
 
-Instantiate the module with:
+    add-module ghcr.io/geniusdynamics/valkey:latest 1
 
-    add-module ghcr.io/nethserver/kickstart:latest 1
-
-The output of the command will return the instance name.
 Output example:
 
-    {"module_id": "kickstart1", "image_name": "kickstart", "image_url": "ghcr.io/nethserver/kickstart:latest"}
+    {"module_id": "valkey1", "image_name": "valkey", "image_url": "ghcr.io/geniusdynamics/valkey:latest"}
 
 ## Configure
 
-Let's assume that the mattermost instance is named `kickstart1`.
+The UI *Settings* page has a role picker. From the command line:
 
-Launch `configure-module`, by setting the following parameters:
-- `host`: a fully qualified domain name for the application
-- `http2https`: enable or disable HTTP to HTTPS redirection (true/false)
-- `lets_encrypt`: enable or disable Let's Encrypt certificate (true/false)
+```bash
+# Standalone server
+api-cli run configure-module --agent module/valkey1 --data '{"role": "standalone"}'
 
-
-Example:
-
-```
-api-cli run configure-module --agent module/kickstart1 --data - <<EOF
-{
-  "host": "kickstart.domain.com",
-  "http2https": true,
-  "lets_encrypt": false
-}
-EOF
+# New cluster on node 1, then members on nodes 2 and 3
+api-cli run configure-module --agent module/valkey1 --data '{"role": "initial"}'
+api-cli run configure-module --agent module/valkey2 --data '{"role": "join", "cluster_id": "valkey1"}'
+api-cli run configure-module --agent module/valkey3 --data '{"role": "join", "cluster_id": "valkey1"}'
 ```
 
-The above command will:
-- start and configure the kickstart instance
-- configure a virtual host for trafik to access the instance
+Input fields:
 
-## Get the configuration
-You can retrieve the configuration with
+| Field | Description |
+|---|---|
+| `role` | `standalone`, `initial` (first node of a new cluster) or `join` |
+| `cluster_id` | with `join`: the cluster to join, from `get-configuration` `cluster_candidates` |
+| `maxmemory_mb` | memory limit of each Valkey process, 0 (default) for none; writes fail when reached (`noeviction`) |
+| `allow_same_node` | with `initial`: allow several members on one node. **Tests only**: such a cluster does not survive a node failure |
 
-```
-api-cli run get-configuration --agent module/kickstart1
-```
+Read the settings with `get-configuration`, the health with
+`get-cluster-status`, the client users with `list-clients`.
+
+## Actions
+
+| Action | Who | Purpose |
+|---|---|---|
+| `configure-module` | administrators | role and settings |
+| `get-configuration`, `get-cluster-status`, `list-clients` | readers | settings, health, clients (no secrets) |
+| `grant-client`, `revoke-client` | role `valkeyclient` | client credentials, see [integration](docs/integration.md) |
+| `admit-member`, `reconcile-cluster` | role `valkeypeer` | used between ns8-valkey instances to form and repair a cluster |
 
 ## Uninstall
 
-To uninstall the instance:
+    remove-module --no-preserve valkey1
 
-    remove-module --no-preserve kickstart1
+A cluster member hands its slots over to the other members before it is
+removed.
 
-## Update
+## Security
 
-To Update the instance:
-
-    api-cli run update-module --data '{"module_url":"ghcr.io/nethserver/kickstart:latest","instances":["kickstart1"],"force":true}'
-
-## Smarthost setting discovery
-
-Some configuration settings, like the smarthost setup, are not part of the
-`configure-module` action input: they are discovered by looking at some
-Redis keys.  To ensure the module is always up-to-date with the
-centralized [smarthost
-setup](https://nethserver.github.io/ns8-core/core/smarthost/) every time
-kickstart starts, the command `bin/discover-smarthost` runs and refreshes
-the `state/smarthost.env` file with fresh values from Redis.
-
-Furthermore if smarthost setup is changed when kickstart is already
-running, the event handler `events/smarthost-changed/10reload_services`
-restarts the main module service.
-
-See also the `systemd/user/kickstart.service` file.
-
-This setting discovery is just an example to understand how the module is
-expected to work: it can be rewritten or discarded completely.
+- Valkey listens on the node cluster VPN address and on loopback only. The
+  VPN is WireGuard and is in the `trusted` firewall zone: no public port.
+- The `default` Valkey user is disabled. Each consumer has its own ACL
+  user, stored as a SHA-256 hash.
+- The cluster bus between members uses mutual TLS with a CA private to the
+  cluster.
+- Secrets (admin and replication passwords, CA key) are in `0600` files of
+  the module state, never in the environment, argv, logs or Redis keys.
 
 ## Debug
 
-some CLI are needed to debug
-
-- The module runs under an agent that initiate a lot of environment variables (in /home/kickstart1/.config/state), it could be nice to verify them
-on the root terminal
-
-    `runagent -m kickstart1 env`
-
-- you can become runagent for testing scripts and initiate all environment variables
-  
-    `runagent -m kickstart1`
-
- the path become : 
-```
-    echo $PATH
-    /home/kickstart1/.config/bin:/usr/local/agent/pyenv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/usr/
+```bash
+runagent -m valkey1 systemctl --user status valkey valkey-replica
+runagent -m valkey1 journalctl --user -u valkey -n 50
+api-cli run module/valkey1/get-cluster-status | jq
 ```
 
-- if you want to debug a container or see environment inside
- `runagent -m kickstart1`
- ```
-podman ps
-CONTAINER ID  IMAGE                                      COMMAND               CREATED        STATUS        PORTS                    NAMES
-d292c6ff28e9  localhost/podman-pause:4.6.1-1702418000                          9 minutes ago  Up 9 minutes  127.0.0.1:20015->80/tcp  80b8de25945f-infra
-d8df02bf6f4a  docker.io/library/postgres:15.5-alpine3.19          --character-set-s...  9 minutes ago  Up 9 minutes  127.0.0.1:20015->80/tcp  postgresql-app
-9e58e5bd676f  docker.io/library/nginx:stable-alpine3.17  nginx -g daemon o...  9 minutes ago  Up 9 minutes  127.0.0.1:20015->80/tcp  kickstart-app
+`valkey-cli` inside the container, as the module administrator (the
+password is read from the state file, not typed on the command line):
+
+```bash
+runagent -m valkey1 sh -c '. ./secrets.env; VALKEYCLI_AUTH=$VALKEY_ADMIN_PASSWORD podman exec -i -e VALKEYCLI_AUTH valkey valkey-cli --user ns8admin -p ${TCP_PORTS%%,*} cluster nodes'
 ```
 
-you can see what environment variable is inside the container
-```
-podman exec  kickstart-app env
-TERM=xterm
-container=podman
-NGINX_VERSION=1.24.0
-PKG_RELEASE=1
-NJS_VERSION=0.7.12
-NGINX_IMAGE=docker.io/nginx:stable-alpine3.17
-CONFIG_DATABASE_URI="postgresql://postgres:Nethesis,1234@127.0.0.1:5432/toto"
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-HOME=/root
-```
-
-you can run a shell inside the container
-
-```
-podman exec -ti   kickstart-app sh
-/ # 
-```
 ## Testing
 
-Test the module using the `test-module.sh` script:
+    ./test-module.sh <NODE_ADDR> ghcr.io/geniusdynamics/valkey:latest
 
-
-    ./test-module.sh <NODE_ADDR> ghcr.io/nethserver/kickstart:latest
-
-The tests are made using [Robot Framework](https://robotframework.org/)
+The Robot Framework suites in `tests/` cover the standalone server and a
+three-member cluster on one node (`allow_same_node`), including member
+restart, rolling restart, member removal and client revocation.
 
 ## UI translation
 
 Translated with [Weblate](https://hosted.weblate.org/projects/ns8/).
-
-To setup the translation process:
-
-- add [GitHub Weblate app](https://docs.weblate.org/en/latest/admin/continuous.html#github-setup) to your repository
-- add your repository to [hosted.weblate.org]((https://hosted.weblate.org) or ask a NethServer developer to add it to ns8 Weblate project

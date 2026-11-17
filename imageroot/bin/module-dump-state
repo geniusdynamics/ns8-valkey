@@ -1,11 +1,44 @@
-#!/bin/bash
+#!/usr/bin/env python3
 
 #
-# Copyright (C) 2022 Nethesis S.r.l.
+# Copyright (C) 2026 Genius Dynamics
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-set -e
+#
+# Before the Restic backup: write a fresh dump.rdb of the main process and
+# save the ACL file. The backup holds dump.rdb and users.acl of the
+# valkey-data volume; the append-only file and the cluster state are
+# excluded (etc/state-exclude.conf). A restore always comes back standalone.
+#
 
-echo "Dumping kickstart postgres database"
-podman exec postgresql-app pg_dump -U postgres --format=c  kickstart > kickstart.pg_dump
+import sys
+import time
+import agent
+import valkey_ns8 as vk
+
+if not vk.role():
+    sys.exit(0)
+
+try:
+    conn = vk.local_conn("main", timeout=10)
+    vk.save_acl(conn)
+    last = conn.lastsave()
+    try:
+        conn.bgsave()
+    except Exception as ex:
+        if "in progress" not in str(ex):
+            raise
+    deadline = time.time() + 1800
+    while time.time() < deadline:
+        info = conn.info("persistence")
+        if not int(info.get("rdb_bgsave_in_progress", 0)) and conn.lastsave() != last:
+            if info.get("rdb_last_bgsave_status") != "ok":
+                raise RuntimeError("BGSAVE failed")
+            break
+        time.sleep(1)
+    else:
+        raise RuntimeError("BGSAVE timed out")
+except Exception as ex:
+    print(agent.SD_ERR + f"Cannot save the Valkey dataset: {ex}", file=sys.stderr)
+    sys.exit(1)

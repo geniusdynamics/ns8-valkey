@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# A clone always starts standalone, with the data and the client users of
+# the source. The cluster state copied from a member is dropped
+# (VALKEY_RESET_CLUSTER), and so is the replica process data.
+#
+
+import os
+import agent
+import agent.tasks
+
+agent.mset_env({"VALKEY_ROLE": "", "VALKEY_CLUSTER_ID": "", "VALKEY_RESET_CLUSTER": "1",
+                "VALKEY_RESET_REPLICA": "1"})
+maxmemory = os.environ.get("VALKEY_MAXMEMORY_MB", "0")
+ret = agent.tasks.run(agent_id=os.environ["AGENT_ID"], action="configure-module", data={
+    "role": "standalone",
+    "maxmemory_mb": int(maxmemory) if maxmemory.isdigit() else 0,
+})
+agent.assert_exp(ret["exit_code"] == 0, "configure-module failed")

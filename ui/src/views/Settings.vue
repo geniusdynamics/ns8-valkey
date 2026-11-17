@@ -1,5 +1,6 @@
 <!--
   Copyright (C) 2022 Nethesis S.r.l.
+  Copyright (C) 2026 Genius Dynamics
   SPDX-License-Identifier: GPL-3.0-or-later
 -->
 <template>
@@ -22,132 +23,122 @@
     <cv-row>
       <cv-column>
         <cv-tile light>
-          <cv-form @submit.prevent="configureModule">
-            <cv-text-input
-              :label="$t('settings.kickstart_fqdn')"
-              placeholder="kickstart.example.org"
-              v-model.trim="host"
+          <cv-skeleton-text
+            v-if="loading.getConfiguration"
+            :paragraph="true"
+            :line-count="8"
+          ></cv-skeleton-text>
+          <cv-form v-else @submit.prevent="configureModule">
+            <cv-radio-group
+              :legend="$t('settings.role')"
+              vertical
               class="mg-bottom"
-              :invalid-message="$t(error.host)"
-              :disabled="loading.getConfiguration || loading.configureModule"
-              ref="host"
+              ref="role"
             >
-            </cv-text-input>
-            <NsToggle
-              value="letsEncrypt"
-              :label="core.$t('apps_lets_encrypt.request_https_certificate')"
-              v-model="isLetsEncryptEnabled"
-              :disabled="stillLoading"
-              class="mg-bottom"
-            >
-              <template #tooltip>
-                <div class="mg-bottom-sm">
-                  {{ core.$t("apps_lets_encrypt.lets_encrypt_tips") }}
-                </div>
-                <div class="mg-bottom-sm">
-                  <cv-link @click="goToCertificates">
-                    {{ core.$t("apps_lets_encrypt.go_to_tls_certificates") }}
-                  </cv-link>
-                </div>
-              </template>
-              <template slot="text-left">{{
-                $t("settings.disabled")
-              }}</template>
-              <template slot="text-right">{{
-                $t("settings.enabled")
-              }}</template>
-            </NsToggle>
-            <cv-row
-              v-if="isLetsEncryptCurrentlyEnabled && !isLetsEncryptEnabled"
-            >
-              <cv-column>
-                <NsInlineNotification
-                  kind="warning"
-                  :title="
-                    core.$t('apps_lets_encrypt.lets_encrypt_disabled_warning')
-                  "
-                  :description="
-                    core.$t(
-                      'apps_lets_encrypt.lets_encrypt_disabled_warning_description',
-                      {
-                        node: this.status.node_ui_name
-                          ? this.status.node_ui_name
-                          : this.status.node,
-                      }
-                    )
-                  "
-                  :showCloseButton="false"
-                />
-              </cv-column>
-            </cv-row>
-            <cv-toggle
-              value="httpToHttps"
-              :label="$t('settings.http_to_https')"
-              v-model="isHttpToHttpsEnabled"
-              :disabled="loading.getConfiguration || loading.configureModule"
-              class="mg-bottom"
-            >
-              <template slot="text-left">{{
-                $t("settings.disabled")
-              }}</template>
-              <template slot="text-right">{{
-                $t("settings.enabled")
-              }}</template>
-            </cv-toggle>
+              <cv-radio-button
+                :label="$t('settings.role_standalone')"
+                value="standalone"
+                v-model="role"
+                :disabled="isFormDisabled || !canChooseRole('standalone')"
+              />
+              <p class="radio-description">
+                {{ $t("settings.role_standalone_description") }}
+              </p>
+              <cv-radio-button
+                :label="$t('settings.role_initial')"
+                value="initial"
+                v-model="role"
+                :disabled="isFormDisabled || !canChooseRole('initial')"
+              />
+              <p class="radio-description">
+                {{ $t("settings.role_initial_description") }}
+              </p>
+              <cv-radio-button
+                :label="$t('settings.role_join')"
+                value="join"
+                v-model="role"
+                :disabled="isFormDisabled || !canChooseRole('join')"
+              />
+              <p class="radio-description">
+                {{ $t("settings.role_join_description") }}
+              </p>
+            </cv-radio-group>
+            <div v-if="role === 'join'" class="maxwidth mg-bottom">
+              <NsComboBox
+                v-model="clusterId"
+                :options="candidateOptions"
+                :title="$t('settings.cluster_id')"
+                :label="$t('settings.cluster_id_placeholder')"
+                :invalid-message="error.cluster_id"
+                :disabled="isFormDisabled || savedRole === 'join'"
+                :auto-filter="true"
+                :auto-highlight="true"
+                class="mg-bottom"
+                ref="cluster_id"
+              />
+              <NsInlineNotification
+                v-if="!candidateOptions.length && savedRole !== 'join'"
+                kind="info"
+                :title="$t('settings.no_clusters')"
+                :description="$t('settings.no_clusters_description')"
+                :showCloseButton="false"
+              />
+            </div>
+            <NsInlineNotification
+              v-if="role !== 'standalone' && expectedMembers < 3"
+              kind="warning"
+              :title="$t('settings.quorum_warning')"
+              :description="
+                $t('settings.quorum_warning_description', {
+                  count: expectedMembers,
+                })
+              "
+              :showCloseButton="false"
+            />
+            <NsInlineNotification
+              v-if="savedRole === 'join' && role === 'standalone'"
+              kind="warning"
+              :title="$t('settings.leave_warning')"
+              :description="$t('settings.leave_warning_description')"
+              :showCloseButton="false"
+            />
             <!-- advanced options -->
             <cv-accordion ref="accordion" class="maxwidth mg-bottom">
               <cv-accordion-item :open="toggleAccordion[0]">
                 <template slot="title">{{ $t("settings.advanced") }}</template>
-                <template slot="content"> </template>
+                <template slot="content">
+                  <NsTextInput
+                    v-model.trim="maxmemoryMb"
+                    type="number"
+                    min="0"
+                    :label="$t('settings.maxmemory_mb')"
+                    :helper-text="$t('settings.maxmemory_mb_helper')"
+                    :invalid-message="$t(error.maxmemory_mb)"
+                    :disabled="isFormDisabled"
+                    ref="maxmemory_mb"
+                  />
+                </template>
               </cv-accordion-item>
             </cv-accordion>
-            <cv-row v-if="error.configureModule">
-              <cv-column>
-                <NsInlineNotification
-                  kind="error"
-                  :title="$t('action.configure-module')"
-                  :description="error.configureModule"
-                  :showCloseButton="false"
-                />
-              </cv-column>
-            </cv-row>
-            <cv-row v-if="error.getStatus">
-              <cv-column>
-                <NsInlineNotification
-                  kind="error"
-                  :title="$t('action.get-status')"
-                  :description="error.getStatus"
-                  :showCloseButton="false"
-                />
-              </cv-column>
-            </cv-row>
-            <cv-row v-if="validationErrorDetails.length">
-              <cv-column>
-                <NsInlineNotification
-                  kind="error"
-                  :title="
-                    core.$t('apps_lets_encrypt.cannot_obtain_certificate')
-                  "
-                  :showCloseButton="false"
-                >
-                  <template #description>
-                    <div class="flex flex-col gap-2">
-                      <div
-                        v-for="(detail, index) in validationErrorDetails"
-                        :key="index"
-                      >
-                        {{ detail }}
-                      </div>
-                    </div>
-                  </template>
-                </NsInlineNotification>
-              </cv-column>
-            </cv-row>
+            <NsInlineNotification
+              v-if="error.configureModule"
+              kind="error"
+              :title="$t('action.configure-module')"
+              :description="error.configureModule"
+              :showCloseButton="false"
+            />
+            <NsInlineNotification
+              v-if="error.role"
+              kind="error"
+              :title="$t('settings.role')"
+              :description="error.role"
+              :showCloseButton="false"
+            />
             <NsButton
               kind="primary"
               :icon="Save20"
               :loading="loading.configureModule"
-              :disabled="loading.getConfiguration || loading.configureModule"
+              :disabled="isFormDisabled"
               >{{ $t("settings.save") }}</NsButton
             >
           </cv-form>
@@ -185,41 +176,59 @@ export default {
       q: {
         page: "settings",
       },
-      status: {},
-      validationErrorDetails: [],
       urlCheckInterval: null,
-      host: "",
-      isLetsEncryptEnabled: false,
-      isLetsEncryptCurrentlyEnabled: false,
-      isHttpToHttpsEnabled: true,
+      role: "standalone",
+      savedRole: "",
+      clusterId: "",
+      maxmemoryMb: "0",
+      members: [],
+      candidates: [],
       loading: {
         getConfiguration: false,
         configureModule: false,
-        getStatus: false,
       },
       error: {
         getConfiguration: "",
         configureModule: "",
-        host: "",
-        lets_encrypt: "",
-        http2https: "",
-        getStatus: false,
+        role: "",
+        cluster_id: "",
+        maxmemory_mb: "",
       },
     };
   },
   computed: {
     ...mapState(["instanceName", "core", "appName"]),
-    stillLoading() {
-      return (
-        this.loading.getConfiguration ||
-        this.loading.configureModule ||
-        this.loading.getStatus
-      );
+    isFormDisabled() {
+      return this.loading.getConfiguration || this.loading.configureModule;
+    },
+    candidateOptions() {
+      return this.candidates.map((c) => ({
+        name: c.cluster_id,
+        value: c.cluster_id,
+        label: this.$t("settings.cluster_option", {
+          cluster: c.cluster_id,
+          members: c.members.join(", "),
+        }),
+      }));
+    },
+    expectedMembers() {
+      if (this.role === "initial") {
+        return Math.max(this.members.length, 1);
+      }
+      if (this.role === "join") {
+        if (this.savedRole === "join") {
+          return this.members.length;
+        }
+        const cluster = this.candidates.find(
+          (c) => c.cluster_id === this.clusterId
+        );
+        return cluster ? cluster.members.length + 1 : 1;
+      }
+      return 1;
     },
   },
   created() {
     this.getConfiguration();
-    this.getStatus();
   },
   beforeRouteEnter(to, from, next) {
     next((vm) => {
@@ -232,69 +241,30 @@ export default {
     next();
   },
   methods: {
-    goToCertificates() {
-      this.core.$router.push("/settings/tls-certificates");
-    },
-    async getStatus() {
-      this.loading.getStatus = true;
-      this.error.getStatus = "";
-      const taskAction = "get-status";
-      const eventId = this.getUuid();
-      // register to task error
-      this.core.$root.$once(
-        `${taskAction}-aborted-${eventId}`,
-        this.getStatusAborted
-      );
-      // register to task completion
-      this.core.$root.$once(
-        `${taskAction}-completed-${eventId}`,
-        this.getStatusCompleted
-      );
-      const res = await to(
-        this.createModuleTaskForApp(this.instanceName, {
-          action: taskAction,
-          extra: {
-            title: this.$t("action." + taskAction),
-            isNotificationHidden: true,
-            eventId,
-          },
-        })
-      );
-      const err = res[0];
-      if (err) {
-        console.error(`error creating task ${taskAction}`, err);
-        this.error.getStatus = this.getErrorMessage(err);
-        this.loading.getStatus = false;
-        return;
+    canChooseRole(role) {
+      // Allowed changes, as checked by configure-module
+      const saved = this.savedRole;
+      if (!saved || saved === "standalone" || saved === role) {
+        return true;
       }
-    },
-    getStatusAborted(taskResult, taskContext) {
-      console.error(`${taskContext.action} aborted`, taskResult);
-      this.error.getStatus = this.$t("error.generic_error");
-      this.loading.getStatus = false;
-    },
-    getStatusCompleted(taskContext, taskResult) {
-      this.status = taskResult.output;
-      this.loading.getStatus = false;
+      if (role === "standalone") {
+        return saved === "join" || this.members.length <= 1;
+      }
+      return false;
     },
     async getConfiguration() {
       this.loading.getConfiguration = true;
       this.error.getConfiguration = "";
       const taskAction = "get-configuration";
       const eventId = this.getUuid();
-
-      // register to task error
       this.core.$root.$once(
         `${taskAction}-aborted-${eventId}`,
         this.getConfigurationAborted
       );
-
-      // register to task completion
       this.core.$root.$once(
         `${taskAction}-completed-${eventId}`,
         this.getConfigurationCompleted
       );
-
       const res = await to(
         this.createModuleTaskForApp(this.instanceName, {
           action: taskAction,
@@ -306,12 +276,10 @@ export default {
         })
       );
       const err = res[0];
-
       if (err) {
         console.error(`error creating task ${taskAction}`, err);
         this.error.getConfiguration = this.getErrorMessage(err);
         this.loading.getConfiguration = false;
-        return;
       }
     },
     getConfigurationAborted(taskResult, taskContext) {
@@ -321,86 +289,72 @@ export default {
     },
     getConfigurationCompleted(taskContext, taskResult) {
       const config = taskResult.output;
-      this.host = config.host;
-      this.isLetsEncryptEnabled = config.lets_encrypt;
-      this.isLetsEncryptCurrentlyEnabled = config.lets_encrypt;
-      this.isHttpToHttpsEnabled = config.http2https;
-
+      this.savedRole = config.role;
+      this.role = config.role || "standalone";
+      this.clusterId = config.cluster_id;
+      this.maxmemoryMb = String(config.maxmemory_mb || 0);
+      this.members = config.members || [];
+      this.candidates = config.cluster_candidates || [];
       this.loading.getConfiguration = false;
-      this.focusElement("host");
     },
     validateConfigureModule() {
       this.clearErrors(this);
-      this.validationErrorDetails = [];
-
       let isValidationOk = true;
-      if (!this.host) {
-        this.error.host = "common.required";
-
-        if (isValidationOk) {
-          this.focusElement("host");
-        }
+      if (this.role === "join" && !this.clusterId) {
+        this.error.cluster_id = this.$t("common.required");
+        this.focusElement("cluster_id");
+        isValidationOk = false;
+      }
+      const mem = Number(this.maxmemoryMb || 0);
+      if (!Number.isInteger(mem) || mem < 0) {
+        this.error.maxmemory_mb = "settings.maxmemory_mb_invalid";
+        this.focusElement("maxmemory_mb");
         isValidationOk = false;
       }
       return isValidationOk;
     },
     configureModuleValidationFailed(validationErrors) {
       this.loading.configureModule = false;
-      let focusAlreadySet = false;
       for (const validationError of validationErrors) {
         const param = validationError.parameter;
-        if (validationError.details) {
-          // show inline error notification with details
-          this.validationErrorDetails = validationError.details
-            .split("\n")
-            .filter((detail) => detail.trim() !== "");
+        const message = this.$t("settings." + validationError.error);
+        if (param in this.error) {
+          this.error[param] = message;
         } else {
-          // set i18n error message
-          this.error[param] = this.$t("settings." + validationError.error);
-          if (!focusAlreadySet) {
-            this.focusElement(param);
-            focusAlreadySet = true;
-          }
+          this.error.configureModule = message;
         }
       }
     },
     async configureModule() {
-      this.error.test_imap = false;
-      this.error.test_smtp = false;
-      const isValidationOk = this.validateConfigureModule();
-      if (!isValidationOk) {
+      if (!this.validateConfigureModule()) {
         return;
       }
-
       this.loading.configureModule = true;
       const taskAction = "configure-module";
       const eventId = this.getUuid();
-
-      // register to task error
       this.core.$root.$once(
         `${taskAction}-aborted-${eventId}`,
         this.configureModuleAborted
       );
-
-      // register to task validation
       this.core.$root.$once(
         `${taskAction}-validation-failed-${eventId}`,
         this.configureModuleValidationFailed
       );
-
-      // register to task completion
       this.core.$root.$once(
         `${taskAction}-completed-${eventId}`,
         this.configureModuleCompleted
       );
+      const data = {
+        role: this.role,
+        maxmemory_mb: Number(this.maxmemoryMb || 0),
+      };
+      if (this.role === "join") {
+        data.cluster_id = this.clusterId;
+      }
       const res = await to(
         this.createModuleTaskForApp(this.instanceName, {
           action: taskAction,
-          data: {
-            host: this.host,
-            lets_encrypt: this.isLetsEncryptEnabled,
-            http2https: this.isHttpToHttpsEnabled,
-          },
+          data,
           extra: {
             title: this.$t("settings.instance_configuration", {
               instance: this.instanceName,
@@ -411,12 +365,10 @@ export default {
         })
       );
       const err = res[0];
-
       if (err) {
         console.error(`error creating task ${taskAction}`, err);
         this.error.configureModule = this.getErrorMessage(err);
         this.loading.configureModule = false;
-        return;
       }
     },
     configureModuleAborted(taskResult, taskContext) {
@@ -426,8 +378,6 @@ export default {
     },
     configureModuleCompleted() {
       this.loading.configureModule = false;
-
-      // reload configuration
       this.getConfiguration();
     },
   },
@@ -442,5 +392,11 @@ export default {
 
 .maxwidth {
   max-width: 38rem;
+}
+
+.radio-description {
+  max-width: 38rem;
+  margin: 0 0 $spacing-05 $spacing-07;
+  color: $text-02;
 }
 </style>

@@ -1,5 +1,6 @@
 <!--
   Copyright (C) 2023 Nethesis S.r.l.
+  Copyright (C) 2026 Genius Dynamics
   SPDX-License-Identifier: GPL-3.0-or-later
 -->
 <template>
@@ -43,29 +44,19 @@
       <cv-column :md="4" :max="4">
         <NsInfoCard
           light
-          :title="$t('status.kickstart_webapp')"
-          :description="this.host ? this.host : $t('status.not_configured')"
-          :icon="Wikis32"
-          :loading="loading.getConfiguration"
-          :isErrorShown="error.getConfiguration"
-          :errorTitle="$t('error.cannot_retrieve_configuration')"
-          :errorDescription="error.getConfiguration"
+          :title="valkeyTitle"
+          :description="valkeyDescription"
+          :icon="Settings32"
+          :loading="loading.getClusterStatus"
+          :isErrorShown="!!error.getClusterStatus"
+          :errorTitle="$t('action.get-cluster-status')"
+          :errorDescription="error.getClusterStatus"
           class="min-height-card"
         >
           <template slot="content">
             <NsButton
-              v-if="this.host"
+              v-if="!cluster.configured && !loading.getClusterStatus"
               kind="ghost"
-              :icon="Launch20"
-              :disabled="loading.getConfiguration"
-              @click="goToWebapp"
-            >
-              {{ $t("status.open_webapp") }}
-            </NsButton>
-            <NsButton
-              v-else
-              kind="ghost"
-              :disabled="loading.getConfiguration"
               :icon="ArrowRight20"
               @click="goToAppPage(instanceName, 'settings')"
             >
@@ -80,7 +71,7 @@
           :title="status.instance || '-'"
           :description="$t('status.app_instance')"
           :icon="Application32"
-          :loading="loading.getStatus || loading.getConfiguration"
+          :loading="loading.getStatus"
           class="min-height-card"
         />
       </cv-column>
@@ -91,7 +82,7 @@
           :titleTooltip="installationNodeTitleTooltip"
           :description="$t('status.installation_node')"
           :icon="Chip32"
-          :loading="loading.getStatus || loading.getConfiguration"
+          :loading="loading.getStatus"
           class="min-height-card"
         />
       </cv-column>
@@ -136,6 +127,181 @@
         />
       </cv-column>
     </cv-row>
+    <!-- cluster -->
+    <template v-if="cluster.configured && cluster.ha_mode === 'cluster'">
+      <cv-row>
+        <cv-column class="page-subtitle">
+          <h4>
+            {{ $t("status.cluster_title", { cluster: cluster.cluster_id }) }}
+          </h4>
+        </cv-column>
+      </cv-row>
+      <cv-row v-for="warning in cluster.warnings" :key="warning">
+        <cv-column>
+          <NsInlineNotification
+            :kind="warning === 'below_quorum' ? 'warning' : 'error'"
+            :title="$t('status.warning_' + warning)"
+            :description="
+              $t('status.warning_' + warning + '_description', {
+                count: cluster.members_count,
+              })
+            "
+            :showCloseButton="false"
+          />
+        </cv-column>
+      </cv-row>
+      <cv-row>
+        <cv-column :md="4" :max="4">
+          <NsInfoCard
+            light
+            :title="String(cluster.members_count)"
+            :description="$t('status.members')"
+            :icon="Chip32"
+            class="min-height-card"
+          />
+        </cv-column>
+        <cv-column :md="4" :max="4">
+          <NsInfoCard
+            light
+            :title="cluster.quorum_ok ? $t('status.yes') : $t('status.no')"
+            :description="$t('status.quorum')"
+            :icon="Cube32"
+            class="min-height-card"
+          />
+        </cv-column>
+        <cv-column :md="4" :max="4">
+          <NsInfoCard
+            light
+            :title="
+              $tc('status.tolerated_failures', cluster.failure_tolerance, {
+                count: cluster.failure_tolerance,
+              })
+            "
+            :description="
+              $t('status.cluster_state', { state: cluster.cluster_state })
+            "
+            :icon="Application32"
+            class="min-height-card"
+          />
+        </cv-column>
+      </cv-row>
+      <cv-row>
+        <cv-column>
+          <cv-tile light>
+            <cv-structured-list>
+              <template slot="headings">
+                <cv-structured-list-heading>{{
+                  $t("status.member")
+                }}</cv-structured-list-heading>
+                <cv-structured-list-heading>{{
+                  $t("status.process")
+                }}</cv-structured-list-heading>
+                <cv-structured-list-heading>{{
+                  $t("status.endpoint")
+                }}</cv-structured-list-heading>
+                <cv-structured-list-heading>{{
+                  $t("status.role")
+                }}</cv-structured-list-heading>
+                <cv-structured-list-heading>{{
+                  $t("status.slots")
+                }}</cv-structured-list-heading>
+                <cv-structured-list-heading>{{
+                  $t("status.replication")
+                }}</cv-structured-list-heading>
+              </template>
+              <template slot="items">
+                <cv-structured-list-item
+                  v-for="proc in cluster.processes"
+                  :key="proc.endpoint"
+                >
+                  <cv-structured-list-data
+                    >{{ proc.module_id }} ({{ $t("status.node") }}
+                    {{ proc.node }})</cv-structured-list-data
+                  >
+                  <cv-structured-list-data>{{
+                    $t("status.process_" + proc.process)
+                  }}</cv-structured-list-data>
+                  <cv-structured-list-data>{{
+                    proc.endpoint
+                  }}</cv-structured-list-data>
+                  <cv-structured-list-data>
+                    <NsTag
+                      v-if="!proc.reachable"
+                      kind="red"
+                      :label="$t('status.down')"
+                    />
+                    <span v-else>{{ $t("status.role_" + proc.role) }}</span>
+                  </cv-structured-list-data>
+                  <cv-structured-list-data>{{
+                    proc.slots
+                  }}</cv-structured-list-data>
+                  <cv-structured-list-data>
+                    <span v-if="proc.role === 'replica'">
+                      {{ proc.primary }} · {{ proc.link || "-" }}
+                      <span v-if="proc.lag_bytes !== null">
+                        · {{ proc.lag_bytes | byteFormat }}
+                      </span>
+                    </span>
+                    <span v-else>-</span>
+                  </cv-structured-list-data>
+                </cv-structured-list-item>
+              </template>
+            </cv-structured-list>
+          </cv-tile>
+        </cv-column>
+      </cv-row>
+    </template>
+    <!-- clients -->
+    <template v-if="cluster.configured">
+      <cv-row>
+        <cv-column class="page-subtitle">
+          <h4>{{ $t("status.clients") }}</h4>
+        </cv-column>
+      </cv-row>
+      <cv-row>
+        <cv-column>
+          <cv-tile light>
+            <NsEmptyState
+              v-if="!clients.length"
+              :title="$t('status.no_clients')"
+            >
+              <template #description>{{
+                $t("status.no_clients_description")
+              }}</template>
+            </NsEmptyState>
+            <cv-structured-list v-else>
+              <template slot="headings">
+                <cv-structured-list-heading>{{
+                  $t("status.client")
+                }}</cv-structured-list-heading>
+                <cv-structured-list-heading>{{
+                  $t("status.username")
+                }}</cv-structured-list-heading>
+                <cv-structured-list-heading>{{
+                  $t("status.key_prefix")
+                }}</cv-structured-list-heading>
+              </template>
+              <template slot="items">
+                <cv-structured-list-item
+                  v-for="client in clients"
+                  :key="client.username"
+                >
+                  <cv-structured-list-data>{{
+                    client.client_id
+                  }}</cv-structured-list-data>
+                  <cv-structured-list-data>{{
+                    client.username
+                  }}</cv-structured-list-data>
+                  <cv-structured-list-data>{{
+                    client.key_prefix || $t("status.all_keys")
+                  }}</cv-structured-list-data>
+                </cv-structured-list-item>
+              </template>
+            </cv-structured-list>
+          </cv-tile>
+        </cv-column>
+      </cv-row>
+    </template>
     <!-- services -->
     <cv-row>
       <cv-column class="page-subtitle">
@@ -316,7 +482,20 @@ export default {
       urlCheckInterval: null,
       isRedirectChecked: false,
       redirectTimeout: 0,
-      host: "",
+      cluster: {
+        configured: false,
+        role: "",
+        ha_mode: "",
+        cluster_id: "",
+        endpoint: "",
+        members_count: 0,
+        quorum_ok: false,
+        failure_tolerance: 0,
+        cluster_state: "",
+        processes: [],
+        warnings: [],
+      },
+      clients: [],
       status: {
         instance: "",
         services: [],
@@ -329,9 +508,12 @@ export default {
         getStatus: false,
         listBackupRepositories: false,
         listBackups: false,
-        getConfiguration: false,
+        getClusterStatus: false,
+        listClients: false,
       },
       error: {
+        getClusterStatus: "",
+        listClients: "",
         getStatus: "",
         listBackupRepositories: "",
         listBackups: "",
@@ -340,6 +522,18 @@ export default {
   },
   computed: {
     ...mapState(["instanceName", "instanceLabel", "core", "appName"]),
+    valkeyTitle() {
+      if (!this.cluster.configured) {
+        return this.$t("status.not_configured");
+      }
+      return this.$t("status.role_title_" + this.cluster.role);
+    },
+    valkeyDescription() {
+      if (!this.cluster.configured) {
+        return this.$t("status.valkey");
+      }
+      return this.cluster.endpoint;
+    },
     installationNodeTitle() {
       if (this.status && this.status.node) {
         if (this.status.node_ui_name) {
@@ -379,32 +573,31 @@ export default {
     clearTimeout(this.redirectTimeout);
   },
   created() {
-    this.getConfiguration();
+    this.getClusterStatus();
+    this.listClients();
     this.getStatus();
     this.listBackupRepositories();
   },
   methods: {
-    goToWebapp() {
-      window.open(`https://${this.host}`, "_blank");
-    },
-    async getConfiguration() {
-      this.loading.getConfiguration = true;
-      this.error.getConfiguration = "";
-      const taskAction = "get-configuration";
+    async runReadTask(taskAction, loadingKey, onCompleted) {
+      this.loading[loadingKey] = true;
+      this.error[loadingKey] = "";
       const eventId = this.getUuid();
-
-      // register to task error
       this.core.$root.$once(
         `${taskAction}-aborted-${eventId}`,
-        this.getConfigurationAborted
+        (taskResult, taskContext) => {
+          console.error(`${taskContext.action} aborted`, taskResult);
+          this.error[loadingKey] = this.$t("error.generic_error");
+          this.loading[loadingKey] = false;
+        }
       );
-
-      // register to task completion
       this.core.$root.$once(
         `${taskAction}-completed-${eventId}`,
-        this.getConfigurationCompleted
+        (taskContext, taskResult) => {
+          onCompleted(taskResult.output);
+          this.loading[loadingKey] = false;
+        }
       );
-
       const res = await to(
         this.createModuleTaskForApp(this.instanceName, {
           action: taskAction,
@@ -416,23 +609,21 @@ export default {
         })
       );
       const err = res[0];
-
       if (err) {
         console.error(`error creating task ${taskAction}`, err);
-        this.error.getConfiguration = this.getErrorMessage(err);
-        this.loading.getConfiguration = false;
-        return;
+        this.error[loadingKey] = this.getErrorMessage(err);
+        this.loading[loadingKey] = false;
       }
     },
-    getConfigurationAborted(taskResult, taskContext) {
-      console.error(`${taskContext.action} aborted`, taskResult);
-      this.error.getConfiguration = this.$t("error.generic_error");
-      this.loading.getConfiguration = false;
+    getClusterStatus() {
+      this.runReadTask("get-cluster-status", "getClusterStatus", (output) => {
+        this.cluster = output;
+      });
     },
-    getConfigurationCompleted(taskContext, taskResult) {
-      const config = taskResult.output;
-      this.host = config.host;
-      this.loading.getConfiguration = false;
+    listClients() {
+      this.runReadTask("list-clients", "listClients", (output) => {
+        this.clients = output.clients;
+      });
     },
     async getStatus() {
       this.loading.getStatus = true;

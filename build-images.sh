@@ -2,6 +2,7 @@
 
 #
 # Copyright (C) 2023 Nethesis S.r.l.
+# Copyright (C) 2026 Genius Dynamics
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
@@ -11,9 +12,9 @@ set -e
 # Prepare variables for later use
 images=()
 # The image will be pushed to GitHub container registry
-repobase="${REPOBASE:-ghcr.io/nethserver}"
+repobase="${REPOBASE:-ghcr.io/geniusdynamics}"
 # Configure the image name
-reponame="kickstart"
+reponame="valkey"
 # Node.js 25+ no longer ships Corepack, install it from npm
 # renovate: datasource=npm packageName=corepack
 corepack_version=0.36.0
@@ -21,36 +22,40 @@ corepack_version=0.36.0
 # Create a new empty container image
 container=$(buildah from scratch)
 
-# Reuse existing nodebuilder-kickstart container, to speed up builds
-if ! buildah containers --format "{{.ContainerName}}" | grep -q nodebuilder-kickstart; then
+# Reuse existing nodebuilder-valkey container, to speed up builds
+if ! buildah containers --format "{{.ContainerName}}" | grep -q nodebuilder-valkey; then
     echo "Pulling NodeJS runtime..."
-    buildah from --name nodebuilder-kickstart -v "${PWD}:/usr/src:Z" docker.io/library/node:26.13.0-slim
-    buildah run nodebuilder-kickstart sh -c "npm install -g corepack@${corepack_version} && corepack enable"
+    buildah from --name nodebuilder-valkey -v "${PWD}:/usr/src:Z" docker.io/library/node:26.13.0-slim
+    buildah run nodebuilder-valkey sh -c "npm install -g corepack@${corepack_version} && corepack enable"
 fi
 
 echo "Build static UI files with node..."
 buildah run \
     --workingdir=/usr/src/ui \
     --env="NODE_OPTIONS=--openssl-legacy-provider" \
-    nodebuilder-kickstart \
+    nodebuilder-valkey \
     sh -c "yarn install && yarn build"
 
 # Add imageroot directory to the container image
 buildah add "${container}" imageroot /imageroot
 buildah add "${container}" ui/dist /ui
-# Setup the entrypoint, ask to reserve one TCP port with the label and set a rootless container
-# Select you image(s) with the label org.nethserver.images
-# ghcr.io/xxxxx is the GitHub container registry or your own registry or docker.io for Docker Hub
-# The image tag is set to latest by default, but can be overridden with the IMAGETAG environment variable
-# --label="org.nethserver.images=docker.io/mariadb:13.0.2 docker.io/roundcube/roundcubemail:1.6.19-apache"
-# rootfull=0 === rootless container
-# tcp-ports-demand=1 number of tcp Port to reserve , 1 is the minimum, can be udp or tcp
+# - valkey@any:valkeypeer: an instance joining a cluster asks a member for
+#   the cluster secrets (admit-member) and for a topology repair
+#   (reconcile-cluster). Both actions are in the valkeypeer role of every
+#   instance (create-module/20roles), not open to readers.
+# - four TCP ports: client and cluster bus ports of the main process, client
+#   and cluster bus ports of the replica process (cluster mode). They are
+#   bound to the node cluster VPN address and loopback only; the cluster
+#   network is in the trusted firewall zone, so no public port is opened.
+# - rootless module, host network (Valkey Cluster announces real addresses)
+# - pinned Valkey image: Renovate tracks the org.nethserver.images label.
+#   Valkey 9.0+ is required (CLUSTER MIGRATESLOTS, CLUSTER REPLICATE NO ONE).
 buildah config --entrypoint=/ \
-    --label="org.nethserver.authorizations=traefik@node:routeadm" \
-    --label="org.nethserver.tcp-ports-demand=1" \
+    --label="org.nethserver.authorizations=valkey@any:valkeypeer" \
+    --label="org.nethserver.tcp-ports-demand=4" \
     --label="org.nethserver.rootfull=0" \
-    --label="org.nethserver.min-core=3.20.1" \
-    --label="org.nethserver.images=docker.io/postgres:17.11-alpine docker.io/nginx:1.31.7-alpine" \
+    --label="org.nethserver.min-core=3.13.0" \
+    --label="org.nethserver.images=docker.io/valkey/valkey:9.1.3-alpine" \
     "${container}"
 # Commit the image
 buildah commit "${container}" "${repobase}/${reponame}"

@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# A cluster member being removed hands its slots over (graceful failover
+# to its replicas on other members, or slot migration), stops, and asks a
+# remaining member to forget it and rebalance. The module-removed event
+# triggers the same repair on every member.
+#
+
+import sys
+import agent
+import agent.tasks
+import valkey_ns8 as vk
+
+if not vk.is_cluster():
+    sys.exit(0)
+
+module_id = vk.env("MODULE_ID")
+try:
+    member_list = vk.members()
+except Exception as ex:
+    vk.warning(f"Cannot read the cluster members: {ex}")
+    sys.exit(0)
+others = [m for m in member_list if m["module_id"] != module_id]
+if not others:
+    sys.exit(0)
+
+try:
+    if not vk.leave_cluster(member_list, module_id):
+        vk.warning("Some slots could not be handed over: their data is lost with this member")
+except Exception as ex:
+    vk.warning(f"Leaving the cluster failed: {ex}")
+
+try:
+    vk.unpublish_records()
+except Exception as ex:
+    vk.warning(f"Cannot remove the service records: {ex}")
+agent.run_helper("systemctl", "--user", "stop", "valkey-replica.service", "valkey.service")
+
+coord = vk.coordinator(others)
+if coord:
+    ret = agent.tasks.run(agent_id=f"module/{coord}", action="reconcile-cluster",
+                          data={"reason": f"{module_id}-removed"}, extra={"isNotificationHidden": True})
+    if ret["exit_code"] != 0:
+        vk.warning(f"reconcile-cluster on {coord} failed (exit code {ret['exit_code']})")
