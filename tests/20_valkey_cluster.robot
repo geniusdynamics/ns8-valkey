@@ -45,9 +45,30 @@ Join a third member
     Should Not Contain    ${status}[warnings]    below_quorum
     Should Be True    ${status}[quorum_ok]
 
+Periodic check changes nothing on a healthy cluster
+    ${rc} =    Execute Command    runagent -m ${m1} systemctl --user is-enabled valkey-reconcile.timer
+    ...    return_rc=True  return_stdout=False
+    Should Be Equal As Integers    ${rc}  0
+    # Skipped while an event-driven repair holds the lock: retry
+    Wait Until Keyword Succeeds    120s    10s    Timer Check Should Change Nothing    ${m1}
+    # Only the coordinator (the first member) runs it
+    ${output} =    Execute Command    runagent -m ${m3} valkey-reconcile --timer
+    ${result} =    Evaluate    json.loads($output)    modules=json
+    Should Be Equal    ${result}[result]    skipped
+    ${status} =    Run Action    ${m2}    get-cluster-status
+    Should Be Equal    ${status}[last_reconcile][result]    ok
+
+Consistency mode applies to the whole cluster
+    Run Action    ${m2}    configure-module    {"role": "join", "cluster_id": "${m1}", "consistency": "consistency"}
+    Wait Until Keyword Succeeds    60s    5s    Consistency Should Be    ${m1}    consistency
+    Wait Until Keyword Succeeds    60s    5s    Consistency Should Be    ${m3}    consistency
+    ${output} =    Execute Command    redis-cli hget module/${m3}/srv/tcp/valkey consistency
+    Should Be Equal    ${output}    consistency
+
 Cluster client works through any member
     ${grant} =    Grant Client    ${m2}    {"client_id": "robot"}
     Should Be Equal    ${grant}[ha_mode]    cluster
+    Should Be Equal    ${grant}[consistency]    consistency
     Should Be True    ${grant}[cluster]
     Length Should Be    ${grant}[nodes]    3
     ${result} =    Probe    ${m1}    write    300
@@ -111,6 +132,20 @@ Remove the instances
     Execute Command    rm -f /root/valkey-grant.json
 
 *** Keywords ***
+Timer Check Should Change Nothing
+    [Arguments]    ${mid}
+    ${output}  ${rc} =    Execute Command    runagent -m ${mid} valkey-reconcile --timer
+    ...    return_rc=True
+    Should Be Equal As Integers    ${rc}  0
+    ${result} =    Evaluate    json.loads($output)    modules=json
+    Should Be Equal    ${result}[result]    ok
+    Should Be Empty    ${result}[changes]
+
+Consistency Should Be
+    [Arguments]    ${mid}    ${mode}
+    ${config} =    Run Action    ${mid}    get-configuration
+    Should Be Equal    ${config}[consistency]    ${mode}
+
 Client Should Be Gone
     [Arguments]    ${mid}
     ${clients} =    Run Action    ${mid}    list-clients

@@ -3,31 +3,99 @@
     "title": "Get valkey configuration",
     "$id": "http://nethserver.org/json-schema/task/output/valkey/get-configuration",
     "type": "object",
-    "required": ["role", "cluster_id", "ha_mode", "maxmemory_mb", "host", "port", "members", "cluster_candidates", "admin_password_set"],
+    "required": [
+        "role",
+        "cluster_id",
+        "ha_mode",
+        "maxmemory_mb",
+        "host",
+        "port",
+        "members",
+        "cluster_candidates",
+        "admin_password_set"
+    ],
     "properties": {
-        "role": {"type": "string", "enum": ["", "standalone", "initial", "join"]},
-        "cluster_id": {"type": "string"},
-        "ha_mode": {"type": "string", "enum": ["", "standalone", "cluster"]},
-        "maxmemory_mb": {"type": "integer"},
-        "allow_same_node": {"type": "boolean"},
-        "host": {"type": "string"},
-        "port": {"type": "integer"},
-        "node_id": {"type": "string"},
-        "version": {"type": "string"},
-        "members": {"type": "array"},
+        "role": {
+            "type": "string",
+            "enum": [
+                "",
+                "standalone",
+                "initial",
+                "join"
+            ]
+        },
+        "cluster_id": {
+            "type": "string"
+        },
+        "ha_mode": {
+            "type": "string",
+            "enum": [
+                "",
+                "standalone",
+                "cluster"
+            ]
+        },
+        "maxmemory_mb": {
+            "type": "integer"
+        },
+        "allow_same_node": {
+            "type": "boolean"
+        },
+        "host": {
+            "type": "string"
+        },
+        "port": {
+            "type": "integer"
+        },
+        "node_id": {
+            "type": "string"
+        },
+        "version": {
+            "type": "string"
+        },
+        "members": {
+            "type": "array"
+        },
         "cluster_candidates": {
             "type": "array",
             "items": {
                 "type": "object",
-                "required": ["cluster_id", "members", "nodes"],
+                "required": [
+                    "cluster_id",
+                    "members",
+                    "nodes"
+                ],
                 "properties": {
-                    "cluster_id": {"type": "string"},
-                    "members": {"type": "array", "items": {"type": "string"}},
-                    "nodes": {"type": "array", "items": {"type": "string"}}
+                    "cluster_id": {
+                        "type": "string"
+                    },
+                    "members": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "nodes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
                 }
             }
         },
-        "admin_password_set": {"type": "boolean"},
-        "cluster_ca_set": {"type": "boolean"}
+        "admin_password_set": {
+            "type": "boolean"
+        },
+        "cluster_ca_set": {
+            "type": "boolean"
+        },
+        "consistency": {
+            "type": "string",
+            "enum": [
+                "availability",
+                "consistency"
+            ]
+        }
     }
 }

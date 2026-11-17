@@ -59,10 +59,47 @@ replica. Replication is asynchronous, so a primary failure can lose about
 the last second of acknowledged writes. For throttle and traffic shaping
 counters this is harmless.
 
-Settings: `cluster-node-timeout 10000`, `cluster-replica-validity-factor 0`
-(a replica always tries to take over, availability first),
-`cluster-require-full-coverage yes`, `appendonly yes` with
-`appendfsync everysec`, `maxmemory-policy noeviction`.
+Settings: `cluster-node-timeout 10000`, `cluster-require-full-coverage yes`,
+`appendonly yes` with `appendfsync everysec`, `maxmemory-policy noeviction`,
+and the consistency mode below.
+
+## Consistency mode
+
+A cluster-wide choice (`configure-module` `consistency`, the *Settings*
+page). Changing it on any member publishes `valkey-cluster-changed` with
+the new mode; every member applies it at once with `CONFIG SET` and in its
+rendered configuration, without restart. A joining member takes the mode of
+the cluster from `admit-member`.
+
+| | `availability` (default) | `consistency` |
+|---|---|---|
+| `min-replicas-to-write` / `min-replicas-max-lag` | 0 / 10 | 1 / 10 |
+| `cluster-replica-validity-factor` | 0 | 10 (Valkey default) |
+
+Trade-off: `availability` keeps accepting writes when a primary has lost
+its replica, and lets any replica take over, so a failover can lose the
+last second or so of writes, or more if the promoted replica had fallen
+behind. `consistency` refuses writes (`NOREPLICAS`) while a primary has no
+replica that acknowledged within 10 seconds, which bounds the loss but
+turns the loss of a replica into a write outage for that shard: with one
+member (replica on the same node) writes stop whenever the replica process
+is down, and the module warns (`writes_need_replica`, `writes_blocked`).
+The topology repair lifts the limit on a node only for the moment it needs
+(the target of a slot migration replays data as writes, and a node that
+becomes an empty primary is flushed), then restores it.
+
+KumoMTA throttles are counters: `availability` is the right mode for them.
+
+## Standalone server to cluster
+
+A standalone server that holds data can become the *initial node*: it
+restarts in cluster mode with the same data and client users. At start
+Valkey claims the slots of its keys; the coordinator assigns all the other
+slots to it. Joining members, instead, must be empty (`instance_not_empty`):
+their data would not belong to the cluster. To bring the data of another
+standalone server into a cluster, restore its backup (it comes back
+standalone), then make the restored instance the initial node; see
+[operations](operations.md#migrate-a-standalone-server-into-a-cluster).
 
 ## Membership: events and actions, no polling
 
@@ -90,6 +127,17 @@ Settings: `cluster-node-timeout 10000`, `cluster-replica-validity-factor 0`
   (`CLUSTER REPLICATE`). While any process is down it only meets and
   forgets: Valkey fails over by itself, and moving slots would be undone
   when the member returns.
+- **Periodic check**: `valkey-reconcile.timer` (cluster mode only) runs the
+  same reconciliation every 5 minutes, with up to 60 seconds of random
+  delay. It does something only on the coordinator; it does not wait for
+  the lock (it skips the run when an event-driven repair holds it) and it
+  skips the run while an update holds the rolling restart lock, so it never
+  moves slots during a rolling restart. Every step reads the cluster state
+  first and acts only on drift: on a healthy cluster it changes nothing and
+  logs nothing. It logs a short line only when it repaired something or
+  failed. The latest run of any member (time, trigger, result `ok`,
+  `repaired`, `deferred`, `error`) is in `get-cluster-status`
+  `last_reconcile` and on the *Status* page.
 - **Events**: every process start publishes `valkey-cluster-changed`
   (reason `main-started`, ...); the coordinator reconciles. A member that
   restarted after a failure therefore gets its primary back. Repairs

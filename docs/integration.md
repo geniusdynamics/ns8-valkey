@@ -50,6 +50,8 @@ module/<valkey_id>/srv/tcp/valkey
               members, this one included ("host:port" alone when standalone)
   tls         "false" (see Security)
   version     Valkey server version, e.g. 9.1.3
+  consistency "availability" or "consistency" (see Consistency modes;
+              always "availability" when standalone)
 ```
 
 ```python
@@ -120,7 +122,8 @@ Output:
   ],
   "urls": ["redis://10.5.4.1:20001", "redis://10.5.4.2:20001", "redis://10.5.4.3:20001"],
   "tls": false,
-  "key_prefix": ""
+  "key_prefix": "",
+  "consistency": "availability"
 }
 ```
 
@@ -232,6 +235,26 @@ same rule as for every quorum system, and the module shows a warning.
 Recommended client settings: a connect timeout and a response timeout of a
 few seconds, and retries, so that requests during a failover fail fast and
 are retried after the new primary is elected.
+
+### Consistency modes
+
+A cluster setting chosen by the administrator, the same on every member,
+published as `consistency` in the record and in the `grant-client`
+output. The client code path is the same; only the failure behaviour
+differs:
+
+| | `availability` (default) | `consistency` |
+|---|---|---|
+| `min-replicas-to-write` | 0 | 1 (`min-replicas-max-lag 10`) |
+| `cluster-replica-validity-factor` | 0: a replica always takes over | 10: a replica out of touch for more than 100 s does not |
+| Writes when a primary has no replica in sync | accepted | refused with `NOREPLICAS` |
+| Writes lost in a failover | up to about one second | only those not yet replicated when the error appears (no more than 10 s window, usually none) |
+| Good for | counters, throttles, caches (KumoMTA) | data a consumer cannot rebuild |
+
+In `consistency` mode a consumer must treat `NOREPLICAS` as a temporary
+error and retry. With a single member, its only replica runs on the same
+node and writes stop whenever that replica is down; the module warns.
+Standalone servers have no replica and ignore the setting.
 
 ### Sentinel
 

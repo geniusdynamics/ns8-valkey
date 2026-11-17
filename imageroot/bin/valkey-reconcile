@@ -8,15 +8,25 @@
 #
 # Repair the Valkey cluster topology from this member: meet new members,
 # forget removed ones, spread the slots and place the replicas. Prints the
-# list of changes as JSON. Usage: valkey-reconcile [reason]
+# outcome as JSON.
+#
+#   valkey-reconcile [reason]   run now (waits for a running repair)
+#   valkey-reconcile --timer    periodic check of valkey-reconcile.timer:
+#                               only on the coordinator, skipped while
+#                               another repair or a rolling restart runs,
+#                               silent unless it repairs something
 #
 
 import json
 import sys
 import valkey_ns8 as vk
 
-reason = sys.argv[1] if len(sys.argv) > 1 else "manual"
-changes = vk.reconcile_local(reason)
-if changes:
+if len(sys.argv) > 1 and sys.argv[1] == "--timer":
+    result = vk.run_reconcile("timer", wait_lock=False, only_coordinator=True, quiet=True)
+else:
+    result = vk.run_reconcile(sys.argv[1] if len(sys.argv) > 1 else "manual")
+if result["changes"]:
+    print(f"Valkey cluster repaired: {len(result['changes'])} change(s)", file=sys.stderr)
     vk.fire_cluster_changed("reconciled")
-json.dump({"changes": changes}, fp=sys.stdout)
+json.dump({"result": result["result"], "changes": result["changes"]}, fp=sys.stdout)
+sys.exit(1 if result["result"] == "error" else 0)

@@ -139,7 +139,11 @@
       <cv-row v-for="warning in cluster.warnings" :key="warning">
         <cv-column>
           <NsInlineNotification
-            :kind="warning === 'below_quorum' ? 'warning' : 'error'"
+            :kind="
+              ['below_quorum', 'writes_need_replica'].includes(warning)
+                ? 'warning'
+                : 'error'
+            "
             :title="$t('status.warning_' + warning)"
             :description="
               $t('status.warning_' + warning + '_description', {
@@ -181,6 +185,24 @@
               $t('status.cluster_state', { state: cluster.cluster_state })
             "
             :icon="Application32"
+            class="min-height-card"
+          />
+        </cv-column>
+        <cv-column :md="4" :max="4">
+          <NsInfoCard
+            light
+            :title="$t('status.consistency_' + cluster.consistency)"
+            :description="$t('status.consistency')"
+            :icon="Settings32"
+            class="min-height-card"
+          />
+        </cv-column>
+        <cv-column :md="4" :max="4">
+          <NsInfoCard
+            light
+            :title="lastReconcileTitle"
+            :description="lastReconcileDescription"
+            :icon="Cube32"
             class="min-height-card"
           />
         </cv-column>
@@ -522,6 +544,24 @@ export default {
   },
   computed: {
     ...mapState(["instanceName", "instanceLabel", "core", "appName"]),
+    lastReconcileTitle() {
+      const last = this.cluster.last_reconcile;
+      if (!last || !last.time) {
+        return this.$t("status.reconcile_never");
+      }
+      return this.$t("status.reconcile_result_" + last.result);
+    },
+    lastReconcileDescription() {
+      const last = this.cluster.last_reconcile;
+      if (!last || !last.time) {
+        return this.$t("status.last_reconcile");
+      }
+      return this.$t("status.last_reconcile_at", {
+        time: new Date(last.time * 1000).toLocaleString(),
+        trigger: last.trigger,
+        changes: last.changes,
+      });
+    },
     valkeyTitle() {
       if (!this.cluster.configured) {
         return this.$t("status.not_configured");
