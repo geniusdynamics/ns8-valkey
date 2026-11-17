@@ -155,6 +155,45 @@ def ha_mode(value=None):
     return "cluster" if is_cluster(value) else "standalone"
 
 
+CONSISTENCY_MODES = ("availability", "consistency")
+# min-replicas-max-lag: a replica counts while its last ack is at most this
+# many seconds old. cluster-replica-validity-factor 10 (Valkey default):
+# a replica disconnected for more than 10 x node timeout does not take over.
+CONSISTENCY_SETTINGS = {
+    "availability": {"min-replicas-to-write": "0", "min-replicas-max-lag": "10",
+                     "cluster-replica-validity-factor": "0"},
+    "consistency": {"min-replicas-to-write": "1", "min-replicas-max-lag": "10",
+                    "cluster-replica-validity-factor": "10"},
+}
+
+
+def consistency():
+    value = env("VALKEY_CONSISTENCY", "availability")
+    return value if value in CONSISTENCY_MODES else "availability"
+
+
+def consistency_settings(mode=None):
+    """Valkey settings of the consistency mode; standalone servers have
+    no replica, so they always use the availability settings"""
+    if not is_cluster():
+        return CONSISTENCY_SETTINGS["availability"]
+    return CONSISTENCY_SETTINGS[mode or consistency()]
+
+
+def apply_consistency_runtime(mode, endpoints=None):
+    """CONFIG SET the settings of a mode on local (or given) processes"""
+    settings = CONSISTENCY_SETTINGS[mode]
+    eps = endpoints or [f"127.0.0.1:{ports()[p][0]}" for p in PROCS]
+    for ep in eps:
+        host, _, port = ep.rpartition(":")
+        try:
+            c = connect(host, int(port), timeout=3)
+            for key, value in settings.items():
+                c.config_set(key, value)
+        except Exception as ex:
+            warning(f"Cannot apply the {mode} settings on {ep}: {type(ex).__name__}")
+
+
 def cluster_id():
     return env("VALKEY_CLUSTER_ID") if is_cluster() else ""
 
@@ -394,6 +433,7 @@ def publish_records(rdb=None, fire_events=True):
         "cluster_id": cluster_id(),
         "tls": "false",
         "version": valkey_version(),
+        "consistency": consistency() if is_cluster(value) else "availability",
     }
     if is_cluster(value):
         crec = {
@@ -406,6 +446,7 @@ def publish_records(rdb=None, fire_events=True):
             "cluster_id": cluster_id(),
             "role": value,
             "allow_same_node": "true" if env("VALKEY_ALLOW_SAME_NODE") == "1" else "false",
+            "consistency": consistency(),
         }
         trx = rdb.pipeline()
         trx.delete(ckey)
@@ -445,12 +486,13 @@ def publish_event(rdb, name, payload):
     rdb.publish(f"{env('AGENT_ID')}/event/{name}", json.dumps(payload))
 
 
-def fire_cluster_changed(reason, rdb=None, cid=None):
+def fire_cluster_changed(reason, rdb=None, cid=None, **extra):
     rdb = rdb or _agent().redis_connect(privileged=True)
     publish_event(rdb, EVENT_CLUSTER_CHANGED, {
         "cluster_id": cid or cluster_id(),
         "module_id": env("MODULE_ID"),
         "reason": reason,
+        **extra,
     })
 
 
@@ -581,7 +623,14 @@ def _snapshot(cfgdir):
             path = os.path.join(cfgdir, name)
             if os.path.isfile(path) and name not in ("reset-cluster", "reset-data"):
                 with open(path, "rb") as fp:
-                    result[name] = hashlib.sha256(fp.read()).hexdigest()
+                    data = fp.read()
+                if name == "valkey.conf":
+                    # The consistency settings are applied at runtime
+                    # (CONFIG SET): changing them needs no restart
+                    data = b"\n".join(line for line in data.splitlines()
+                                       if not line.startswith((b"min-replicas-",
+                                                               b"cluster-replica-validity-factor")))
+                result[name] = hashlib.sha256(data).hexdigest()
     return result
 
 
@@ -616,6 +665,7 @@ def render(proc):
         'save "3600 1 300 100 60 10000"',
         "maxmemory-policy noeviction",
         "tcp-keepalive 60",
+        *[f"{k} {v}" for k, v in consistency_settings().items() if not k.startswith("cluster-")],
         f"masteruser {REPL_USER}",
         f"masterauth {values['VALKEY_REPL_PASSWORD']}",
     ]
@@ -634,7 +684,7 @@ def render(proc):
             f"cluster-port {bus}",
             f"cluster-announce-ip {announce}",
             f"cluster-node-timeout {NODE_TIMEOUT_MS}",
-            "cluster-replica-validity-factor 0",
+            f"cluster-replica-validity-factor {consistency_settings()['cluster-replica-validity-factor']}",
             "cluster-require-full-coverage yes",
             "cluster-allow-replica-migration yes",
             "tls-cluster yes",
@@ -720,6 +770,33 @@ def expected_processes(member_list):
     return result
 
 
+class relaxed_writes:
+    """Allow writes on a primary without replica for a moment (consistency
+    mode sets min-replicas-to-write 1): FLUSHALL of a node that becomes an
+    empty primary, and the target of a slot migration, which replays the
+    data as writes and would refuse them"""
+
+    def __init__(self, conn):
+        self.conn = conn
+        self.saved = None
+
+    def __enter__(self):
+        try:
+            self.saved = self.conn.config_get("min-replicas-to-write").get("min-replicas-to-write")
+            if self.saved not in (None, "0"):
+                self.conn.config_set("min-replicas-to-write", "0")
+        except Exception:
+            self.saved = None
+        return self.conn
+
+    def __exit__(self, *args):
+        if self.saved not in (None, "0"):
+            try:
+                self.conn.config_set("min-replicas-to-write", self.saved)
+            except Exception as ex:
+                warning(f"Cannot restore min-replicas-to-write: {type(ex).__name__}")
+
+
 class Reconciler:
     """Bring a Valkey cluster to the layout of its NS8 members:
 
@@ -738,6 +815,7 @@ class Reconciler:
         self.expected = expected_processes(member_list)
         self.conns = {}
         self.changes = []
+        self.deferred = False
 
     # -- helpers ----------------------------------------------------------
 
@@ -860,16 +938,40 @@ class Reconciler:
             self.note(f"FORGET {node.endpoint} ({node.id})")
 
     def ensure_slots(self):
+        """Assign the slots no node owns: all of them on a new cluster, or
+        the rest after a standalone server with data became the initial
+        node (at start Valkey claims only the slots of its keys). They go
+        to the primary that owns the most slots, else to the main process
+        of the first member."""
         view = self.view()
-        if any(n.slots for n in view.values()):
+        owned = set()
+        for n in view.values():
+            for a, b in n.slots:
+                owned.update(range(a, b + 1))
+        if len(owned) == TOTAL_SLOTS:
             return
-        first = self.members[0]
-        ep = f"{first['host']}:{first['procs']['main'][0]}"
+        owners = [n for ep, n in view.items() if ep in self.expected and n.is_master and n.slots
+                  and not n.failed]
+        if owners:
+            ep = max(owners, key=lambda n: n.slot_count).endpoint
+        else:
+            first = self.members[0]
+            ep = f"{first['host']}:{first['procs']['main'][0]}"
         c = self.conn(ep)
-        if c:
-            c.execute_command("CLUSTER", "ADDSLOTSRANGE", 0, TOTAL_SLOTS - 1)
-            self.note(f"ADDSLOTSRANGE 0-{TOTAL_SLOTS - 1} on {ep}")
-            self.wait_state_ok(ep)
+        if not c:
+            return
+        ranges = []
+        for slot in range(TOTAL_SLOTS):
+            if slot in owned:
+                continue
+            if ranges and ranges[-1][1] == slot - 1:
+                ranges[-1][1] = slot
+            else:
+                ranges.append([slot, slot])
+        args = [x for r in ranges for x in r]
+        c.execute_command("CLUSTER", "ADDSLOTSRANGE", *args)
+        self.note(f"ADDSLOTSRANGE {TOTAL_SLOTS - len(owned)} unassigned slots on {ep}")
+        self.wait_state_ok(ep)
 
     def wait_state_ok(self, endpoint, timeout=30):
         deadline = time.time() + timeout
@@ -901,7 +1003,8 @@ class Reconciler:
         # Always write FLUSHALL to the append-only file and rewrite it: the
         # detached replica empties its dataset in memory only, and loading
         # the old AOF base at the next start would bring back stale keys
-        c.flushall()
+        with relaxed_writes(c):
+            c.flushall()
         try:
             c.execute_command("BGREWRITEAOF")
         except Exception as ex:
@@ -961,6 +1064,14 @@ class Reconciler:
         return targets
 
     def migrate(self, source_ep, ranges, target_id):
+        target = next((n for n in self.view().values() if n.id == target_id), None)
+        tconn = self.conn(target.endpoint) if target else None
+        if tconn:
+            with relaxed_writes(tconn):
+                return self._migrate(source_ep, ranges, target_id)
+        return self._migrate(source_ep, ranges, target_id)
+
+    def _migrate(self, source_ep, ranges, target_id):
         c = self.conn(source_ep)
         args = []
         for a, b in ranges:
@@ -1060,7 +1171,8 @@ class Reconciler:
                     self.log(f"{n.endpoint} still owns slots: not turned into a replica")
                     continue
                 if n.is_master and c.dbsize():
-                    c.flushall()
+                    with relaxed_writes(c):
+                        c.flushall()
                 c.execute_command("CLUSTER", "REPLICATE", best.id)
                 count[best.id] += 1
                 self.note(f"REPLICATE {n.endpoint} -> {best.endpoint}")
@@ -1080,6 +1192,7 @@ class Reconciler:
             # A member is down or restarting: Valkey fails over by itself.
             # Moving slots now would be undone when it comes back.
             self.log(f"Not rebalancing while processes are down: {', '.join(down)}")
+            self.deferred = True
             return True
         targets = self.choose_primaries()
         if targets:
@@ -1302,14 +1415,28 @@ class FileLock:
         self.path = state_path(f".{name}.lock")
         self.fd = None
 
-    def __enter__(self):
+    def acquire(self, blocking=True):
         self.fd = os.open(self.path, os.O_WRONLY | os.O_CREAT, 0o600)
-        fcntl.flock(self.fd, fcntl.LOCK_EX)
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+            return True
+        except BlockingIOError:
+            os.close(self.fd)
+            self.fd = None
+            return False
+
+    def release(self):
+        if self.fd is not None:
+            fcntl.flock(self.fd, fcntl.LOCK_UN)
+            os.close(self.fd)
+            self.fd = None
+
+    def __enter__(self):
+        self.acquire()
         return self
 
     def __exit__(self, *args):
-        fcntl.flock(self.fd, fcntl.LOCK_UN)
-        os.close(self.fd)
+        self.release()
 
 
 def coordinator(member_list, password=None):
@@ -1324,12 +1451,98 @@ def coordinator(member_list, password=None):
 
 def reconcile_local(reason="", logger=log):
     """Run the reconciliation from this member (serialized by a lock)"""
+    result = run_reconcile(reason, logger=logger)
+    return result["changes"]
+
+
+RECONCILE_KEY = "reconcile"
+
+
+def record_reconcile(result):
+    """Last reconciliation of this member, in its own Redis keyspace (no
+    secrets): get-cluster-status shows the latest one of the cluster"""
+    try:
+        rdb = _agent().redis_connect(privileged=True)
+        rdb.hset(f"module/{env('MODULE_ID')}/{RECONCILE_KEY}", mapping={
+            "time": str(int(result["time"])),
+            "trigger": result["trigger"][:64],
+            "result": result["result"],
+            "changes": str(len(result["changes"])),
+            "module_id": env("MODULE_ID"),
+        })
+    except Exception as ex:
+        warning(f"Cannot record the reconciliation: {type(ex).__name__}")
+
+
+def last_reconcile(member_list):
+    """Latest recorded reconciliation among the members, or {}"""
+    try:
+        rdb = _agent().redis_connect(use_replica=True)
+    except Exception:
+        return {}
+    latest = {}
+    for m in member_list:
+        rec = rdb.hgetall(f"module/{m['module_id']}/{RECONCILE_KEY}") or {}
+        if rec.get("time", "").isdigit() and int(rec["time"]) > int(latest.get("time", 0) or 0):
+            latest = rec
+    if latest:
+        latest = {"time": int(latest["time"]), "trigger": latest.get("trigger", ""),
+                  "result": latest.get("result", ""), "changes": int(latest.get("changes", "0") or 0),
+                  "module_id": latest.get("module_id", "")}
+    return latest
+
+
+def restart_in_progress(member_list):
+    """True while a member holds the rolling restart lock of an update"""
+    client = cluster_client(member_list, timeout=3)
+    if not client:
+        return False
+    try:
+        return bool(client.get(RESTART_LOCK))
+    except Exception:
+        return False
+
+
+def run_reconcile(trigger, logger=log, wait_lock=True, only_coordinator=False, quiet=False):
+    """Reconcile from this member and record the outcome.
+
+    wait_lock=False skips the run when another one holds the lock (the
+    timer never overlaps an event-driven run). only_coordinator=True runs
+    only on the coordinator. quiet=True keeps the log silent unless
+    something is repaired or fails. Returns {"result", "changes", ...};
+    result is one of ok (nothing to do), repaired, deferred (a process is
+    down: only membership was checked), skipped (not run), error."""
+    out = {"time": time.time(), "trigger": trigger, "result": "skipped", "changes": []}
     if not is_cluster():
-        return []
-    with FileLock("reconcile"):
-        rec = Reconciler(members(), logger=logger)
-        rec.run()
-        return rec.changes
+        return out
+    buffered = []
+    sink = buffered.append if quiet else logger
+    lock = FileLock("reconcile")
+    if not lock.acquire(blocking=wait_lock):
+        return out
+    try:
+        member_list = members()
+        if only_coordinator and coordinator(member_list) != env("MODULE_ID"):
+            return out
+        if quiet and restart_in_progress(member_list):
+            return out  # an update restarts members one by one: let it finish
+        rec = Reconciler(member_list, logger=sink)
+        try:
+            rec.run()
+            out["result"] = "repaired" if rec.changes else ("deferred" if rec.deferred else "ok")
+        except Exception as ex:
+            out["result"] = "error"
+            buffered.append(f"Reconciliation failed: {ex}")
+            if not quiet:
+                logger(buffered[-1])
+        out["changes"] = rec.changes
+        if quiet and out["result"] in ("repaired", "error"):
+            for line in buffered:
+                logger(line)
+        record_reconcile(out)
+        return out
+    finally:
+        lock.release()
 
 
 # ---------------------------------------------------------------------------

@@ -56,4 +56,5 @@ json.dump({
     "urls": [f"redis://{n['host']}:{n['port']}" for n in nodes],
     "tls": False,
     "key_prefix": key_prefix,
+    "consistency": vk.consistency() if vk.is_cluster() else "availability",
 }, fp=sys.stdout)

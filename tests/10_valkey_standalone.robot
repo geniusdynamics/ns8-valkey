@@ -77,6 +77,15 @@ Data survives a restart
     ${result} =    Probe    ${module_id}    read
     Should Be True    ${result}[ok]    ${result}
 
+A standalone server with data becomes the initial node of a cluster
+    Run Action    ${module_id}    configure-module    {"role": "initial", "maxmemory_mb": 128}
+    Wait Until Cluster Healthy    ${module_id}    1    0
+    ${grant} =    Grant Client    ${module_id}    {"client_id": "robot"}
+    Should Be Equal    ${grant}[ha_mode]    cluster
+    Should Be Equal    ${grant}[consistency]    availability
+    ${result} =    Probe    ${module_id}    read
+    Should Be True    ${result}[ok]    ${result}
+
 Revoke client credentials
     ${result} =    Run Action    ${module_id}    revoke-client    {"client_id": "robot"}
     Should Be True    ${result}[revoked]

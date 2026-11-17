@@ -23,7 +23,8 @@ units = ["valkey.service"]
 if vk.is_cluster():
     units.append("valkey-replica.service")
 else:
-    agent.run_helper("systemctl", "--user", "disable", "--now", "valkey-replica.service")
+    agent.run_helper("systemctl", "--user", "disable", "--now", "valkey-replica.service",
+                     "valkey-reconcile.timer")
 
 reset = any(vk.env(var) == "1" for var in ("VALKEY_RESET_CLUSTER", "VALKEY_RESET_DATA", "VALKEY_RESET_REPLICA"))
 for unit in units:
@@ -42,3 +43,12 @@ for proc in vk.PROCS:
         path = vk.state_path(f"valkey-{proc}", marker)
         if os.path.exists(path):
             os.unlink(path)
+
+# Periodic topology check, cluster mode only
+if vk.is_cluster():
+    agent.run_helper("systemctl", "--user", "enable", "--now", "valkey-reconcile.timer").check_returncode()
+
+# The consistency mode applies at runtime too (CONFIG SET), so a change
+# needs no restart
+for proc in (vk.PROCS if vk.is_cluster() else ()):
+    vk.apply_consistency_runtime(vk.consistency(), [f"127.0.0.1:{vk.ports()[proc][0]}"])

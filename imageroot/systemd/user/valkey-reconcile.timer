@@ -1,0 +1,19 @@
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# Every 5 minutes, with jitter so that members and clusters do not check
+# at the same time. Enabled in cluster mode only.
+#
+[Unit]
+Description=Valkey cluster topology check timer
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

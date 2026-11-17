@@ -95,6 +95,43 @@
               "
               :showCloseButton="false"
             />
+            <cv-radio-group
+              v-if="role !== 'standalone'"
+              :legend="$t('settings.consistency')"
+              vertical
+              class="mg-bottom"
+              ref="consistency"
+            >
+              <cv-radio-button
+                :label="$t('settings.consistency_availability')"
+                value="availability"
+                v-model="consistency"
+                :disabled="isFormDisabled || isConsistencyLocked"
+              />
+              <p class="radio-description">
+                {{ $t("settings.consistency_availability_description") }}
+              </p>
+              <cv-radio-button
+                :label="$t('settings.consistency_consistency')"
+                value="consistency"
+                v-model="consistency"
+                :disabled="isFormDisabled || isConsistencyLocked"
+              />
+              <p class="radio-description">
+                {{ $t("settings.consistency_consistency_description") }}
+              </p>
+            </cv-radio-group>
+            <NsInlineNotification
+              v-if="
+                role !== 'standalone' &&
+                consistency === 'consistency' &&
+                expectedMembers < 2
+              "
+              kind="warning"
+              :title="$t('settings.consistency_warning')"
+              :description="$t('settings.consistency_warning_description')"
+              :showCloseButton="false"
+            />
             <NsInlineNotification
               v-if="savedRole === 'join' && role === 'standalone'"
               kind="warning"
@@ -181,6 +218,7 @@ export default {
       savedRole: "",
       clusterId: "",
       maxmemoryMb: "0",
+      consistency: "availability",
       members: [],
       candidates: [],
       loading: {
@@ -198,6 +236,10 @@ export default {
   },
   computed: {
     ...mapState(["instanceName", "core", "appName"]),
+    isConsistencyLocked() {
+      // A joining member takes the setting of its cluster
+      return this.role === "join" && this.savedRole !== "join";
+    },
     isFormDisabled() {
       return this.loading.getConfiguration || this.loading.configureModule;
     },
@@ -293,6 +335,7 @@ export default {
       this.role = config.role || "standalone";
       this.clusterId = config.cluster_id;
       this.maxmemoryMb = String(config.maxmemory_mb || 0);
+      this.consistency = config.consistency || "availability";
       this.members = config.members || [];
       this.candidates = config.cluster_candidates || [];
       this.loading.getConfiguration = false;
@@ -350,6 +393,9 @@ export default {
       };
       if (this.role === "join") {
         data.cluster_id = this.clusterId;
+      }
+      if (this.role !== "standalone" && !this.isConsistencyLocked) {
+        data.consistency = this.consistency;
       }
       const res = await to(
         this.createModuleTaskForApp(this.instanceName, {

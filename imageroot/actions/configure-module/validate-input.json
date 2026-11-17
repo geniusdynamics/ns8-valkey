@@ -4,17 +4,35 @@
     "$id": "http://nethserver.org/json-schema/task/input/valkey/configure-module",
     "description": "Choose the role of the instance: standalone server, initial node of a new cluster, or member joining an existing cluster",
     "examples": [
-        {"role": "standalone"},
-        {"role": "initial", "maxmemory_mb": 512},
-        {"role": "join", "cluster_id": "valkey1"}
+        {
+            "role": "standalone"
+        },
+        {
+            "role": "initial",
+            "maxmemory_mb": 512
+        },
+        {
+            "role": "join",
+            "cluster_id": "valkey1"
+        },
+        {
+            "role": "initial",
+            "consistency": "consistency"
+        }
     ],
     "type": "object",
-    "required": ["role"],
+    "required": [
+        "role"
+    ],
     "additionalProperties": false,
     "properties": {
         "role": {
             "type": "string",
-            "enum": ["standalone", "initial", "join"],
+            "enum": [
+                "standalone",
+                "initial",
+                "join"
+            ],
             "description": "standalone: one server, no cluster. initial: first node of a new Valkey Cluster, other instances can join it. join: become a member of the cluster cluster_id"
         },
         "cluster_id": {
@@ -31,6 +49,14 @@
         "allow_same_node": {
             "type": "boolean",
             "description": "With role initial: let several members run on the same node. For tests only: such a cluster survives no node failure"
+        },
+        "consistency": {
+            "type": "string",
+            "enum": [
+                "availability",
+                "consistency"
+            ],
+            "description": "Cluster setting, chosen on any member and applied to all. availability (default): writes go on when a primary has no replica in sync, and a replica always takes over a failed primary. consistency: a primary accepts writes only while at least one replica acknowledged within 10 seconds (min-replicas-to-write 1), and long-disconnected replicas do not take over. Ignored by standalone servers"
         }
     }
 }

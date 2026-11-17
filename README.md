@@ -49,6 +49,7 @@ Input fields:
 |---|---|
 | `role` | `standalone`, `initial` (first node of a new cluster) or `join` |
 | `cluster_id` | with `join`: the cluster to join, from `get-configuration` `cluster_candidates` |
+| `consistency` | cluster-wide: `availability` (default) or `consistency`, see [high availability](docs/high-availability.md#consistency-mode) |
 | `maxmemory_mb` | memory limit of each Valkey process, 0 (default) for none; writes fail when reached (`noeviction`) |
 | `allow_same_node` | with `initial`: allow several members on one node. **Tests only**: such a cluster does not survive a node failure |
 

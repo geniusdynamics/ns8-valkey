@@ -1,0 +1,20 @@
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# Periodic topology check of a cluster member (valkey-reconcile.timer).
+# It acts only on the coordinator and only when the cluster drifted from
+# its layout; events trigger the same repair at once.
+#
+[Unit]
+Description=Valkey cluster topology check
+After=valkey.service valkey-replica.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=%S/state/environment
+WorkingDirectory=%S/state
+StandardOutput=null
+ExecStart=runagent valkey-reconcile --timer
