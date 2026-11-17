@@ -2,6 +2,7 @@
 Documentation    Standalone server: install, configure, client credentials,
 ...              revocation, backup dump, removal.
 Library    SSHLibrary
+Library    String
 Resource    valkey.resource
 
 *** Variables ***
@@ -39,10 +40,12 @@ Status reports a running standalone server
 
 Listening only on the VPN address and loopback
     ${config} =    Run Action    ${module_id}    get-configuration
-    ${output} =    Execute Command    ss -Htln 'sport = :${config}[port]'
-    Should Not Contain    ${output}    0.0.0.0
-    Should Not Contain    ${output}    *:${config}[port]
-    Should Contain    ${output}    127.0.0.1
+    # Local address column only: the peer column is always 0.0.0.0:*
+    ${output} =    Execute Command    ss -Htln 'sport = :${config}[port]' | awk '{print $4}' | sort
+    @{addresses} =    Split To Lines    ${output}
+    Should Contain    ${addresses}    127.0.0.1:${config}[port]
+    Should Contain    ${addresses}    ${config}[host]:${config}[port]
+    Length Should Be    ${addresses}    2
 
 Grant client credentials
     ${grant} =    Grant Client    ${module_id}    {"client_id": "robot"}

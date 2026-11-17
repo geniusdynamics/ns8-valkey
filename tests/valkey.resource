@@ -51,7 +51,8 @@ Probe
 
 Wait Until Cluster Healthy
     [Arguments]    ${module_id}    ${members}    ${tolerance}
-    Wait Until Keyword Succeeds    180s    5s    Cluster Should Be Healthy    ${module_id}    ${members}    ${tolerance}
+    ${status} =    Wait Until Keyword Succeeds    180s    5s    Cluster Should Be Healthy    ${module_id}    ${members}    ${tolerance}
+    RETURN    ${status}
 
 Cluster Should Be Healthy
     [Arguments]    ${module_id}    ${members}    ${tolerance}
