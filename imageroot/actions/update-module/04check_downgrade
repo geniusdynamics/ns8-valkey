@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# Refuse to install a module image with an older Valkey server: Valkey
+# cannot read the data files (RDB, AOF) written by a newer release. Runs
+# before the core steps pull and extract the new image. Also refused with
+# "force": restore a backup on an instance of the older release instead.
+#
+
+import json
+import subprocess
+import sys
+import agent
+import valkey_ns8 as vk
+
+request = json.load(sys.stdin)
+image_url = request["module_url"]
+current = vk.version_tuple(vk.valkey_version())
+if not current:
+    sys.exit(0)
+
+agent.run_helper("podman-pull-missing", image_url).check_returncode()
+proc = subprocess.run(["podman", "image", "inspect", image_url], capture_output=True, text=True)
+if proc.returncode != 0:
+    sys.exit(0)  # the core step reports the error
+labels = json.loads(proc.stdout)[0].get("Labels") or {}
+target = ()
+for url in (labels.get("org.nethserver.images") or "").split():
+    if agent.get_image_name_from_url(url) == "valkey":
+        tag = url.rsplit(":", 1)[-1]
+        target = vk.version_tuple(tag.split("-", 1)[0])
+if target and target < current:
+    print(agent.SD_ERR + "Downgrade refused: the new module image runs Valkey "
+          f"{'.'.join(map(str, target))}, older than the installed {'.'.join(map(str, current))}. "
+          "Valkey cannot read data files written by a newer release.", file=sys.stderr)
+    agent.set_status("validation-failed")
+    json.dump([{"field": "module_url", "parameter": "module_url", "value": image_url,
+                "error": "valkey_downgrade_refused"}], fp=sys.stdout)
+    sys.exit(3)

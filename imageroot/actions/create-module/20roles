@@ -1,0 +1,19 @@
+#!/bin/bash
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Custom roles. Their action names do not start with get-, list-, show- or
+# read-: the builtin reader role cannot run them.
+#
+# - valkeyclient: consumer modules (authorization valkey@any:valkeyclient)
+#   get and drop their own Valkey ACL user
+# - valkeypeer: other ns8-valkey instances (valkey@any:valkeypeer) join a
+#   cluster and ask for a topology repair
+
+set -e
+exec 1>&2
+redis-exec SADD "${AGENT_ID}/roles/valkeyclient" "grant-client" "revoke-client"
+redis-exec SADD "${AGENT_ID}/roles/valkeypeer" "admit-member" "reconcile-cluster"

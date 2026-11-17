@@ -1,0 +1,31 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Client credentials",
+    "$id": "http://nethserver.org/json-schema/task/output/valkey/grant-client",
+    "type": "object",
+    "required": ["client_id", "username", "password", "ha_mode", "cluster", "cluster_id", "nodes", "urls", "tls", "key_prefix"],
+    "properties": {
+        "client_id": {"type": "string"},
+        "username": {"type": "string"},
+        "password": {"type": "string"},
+        "ha_mode": {"type": "string", "enum": ["standalone", "cluster"]},
+        "cluster": {"type": "boolean"},
+        "cluster_id": {"type": "string"},
+        "nodes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["host", "port", "module_id", "node"],
+                "properties": {
+                    "host": {"type": "string"},
+                    "port": {"type": "integer"},
+                    "module_id": {"type": "string"},
+                    "node": {"type": "string"}
+                }
+            }
+        },
+        "urls": {"type": "array", "items": {"type": "string"}},
+        "tls": {"type": "boolean"},
+        "key_prefix": {"type": "string"}
+    }
+}

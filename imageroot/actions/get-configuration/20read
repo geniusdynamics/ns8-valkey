@@ -1,26 +1,44 @@
 #!/usr/bin/env python3
 
 #
-# Copyright (C) 2022 Nethesis S.r.l.
+# Copyright (C) 2026 Genius Dynamics
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
 #
-# Read configuration
+# Current settings, the clusters this instance can join and the members of
+# its own cluster. No secrets: only *_set booleans.
 #
 
+import json
 import os
 import sys
-import json
-import agent
+import valkey_ns8 as vk
 
-# Prepare return variable
-config = {}
-
-# Read current configuration from the environment file
-config["host"] = os.getenv("TRAEFIK_HOST","")
-config["http2https"] = os.getenv("TRAEFIK_HTTP2HTTPS") == "True"
-config["lets_encrypt"] = agent.get_route(os.environ['MODULE_ID']).get('lets_encrypt', False)
-
-# Dump the configuration to stdout
-json.dump(config, fp=sys.stdout)
+role = vk.role()
+try:
+    candidates = vk.cluster_candidates()
+except Exception as ex:
+    vk.warning(f"Cannot list the Valkey clusters: {type(ex).__name__}")
+    candidates = []
+try:
+    members = [{"module_id": m["module_id"], "node": m["node"], "host": m["host"],
+                "port": m["procs"]["main"][0]} for m in vk.members()] if vk.is_cluster() else []
+except Exception:
+    members = []
+p = vk.ports()
+json.dump({
+    "role": role,
+    "cluster_id": vk.cluster_id(),
+    "ha_mode": vk.ha_mode(role) if role else "",
+    "maxmemory_mb": int(vk.env("VALKEY_MAXMEMORY_MB", "0") or 0),
+    "allow_same_node": vk.env("VALKEY_ALLOW_SAME_NODE") == "1",
+    "host": vk.local_host(),
+    "port": p["main"][0],
+    "node_id": vk.env("NODE_ID"),
+    "version": vk.valkey_version(),
+    "members": members,
+    "cluster_candidates": candidates,
+    "admin_password_set": bool(vk.read_secrets().get("VALKEY_ADMIN_PASSWORD")),
+    "cluster_ca_set": bool(os.path.exists(vk.tls_path("ca.key"))),
+}, fp=sys.stdout)

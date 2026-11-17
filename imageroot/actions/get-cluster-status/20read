@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# Health of the instance and of its cluster: quorum, role of each member
+# and process, slots, replication lag, warnings. No secrets: readers can
+# run it.
+#
+# Warnings: below_quorum (fewer than 3 members: no automatic failover),
+# members_down, cluster_down, unreachable, no_redundancy (a primary has no
+# replica on another member), not_running.
+#
+
+import json
+import sys
+import valkey_ns8 as vk
+
+role = vk.role()
+status = {
+    "configured": bool(role),
+    "role": role,
+    "ha_mode": vk.ha_mode(role) if role else "",
+    "cluster_id": vk.cluster_id(),
+    "version": vk.valkey_version(),
+    "endpoint": f"{vk.local_host()}:{vk.ports()['main'][0]}" if role else "",
+    "members_count": 0,
+    "shards": 0,
+    "cluster_state": "",
+    "quorum_ok": False,
+    "failure_tolerance": 0,
+    "processes": [],
+    "warnings": [],
+    "local": {},
+}
+
+if role:
+    try:
+        conn = vk.local_conn("main")
+        info = conn.info()
+        status["local"] = {
+            "running": True,
+            "keys": int(conn.dbsize()),
+            "used_memory": int(info.get("used_memory", 0)),
+            "maxmemory": int(info.get("maxmemory", 0)),
+            "connected_clients": int(info.get("connected_clients", 0)),
+            "uptime_seconds": int(info.get("uptime_in_seconds", 0)),
+            "aof_enabled": bool(int(info.get("aof_enabled", 0))),
+            "rdb_last_save_time": int(info.get("rdb_last_save_time", 0)),
+            "server_version": info.get("valkey_version") or info.get("redis_version", ""),
+        }
+    except Exception:
+        status["local"] = {"running": False}
+        status["warnings"].append("not_running")
+
+if role and vk.is_cluster():
+    try:
+        health = vk.cluster_health(vk.members())
+        status.update({k: health[k] for k in ("members_count", "shards", "cluster_state", "quorum_ok",
+                                              "failure_tolerance", "processes")})
+        status["warnings"] = sorted(set(status["warnings"] + health["warnings"]))
+    except Exception as ex:
+        vk.warning(f"Cannot read the cluster health: {type(ex).__name__}")
+        status["warnings"].append("unreachable")
+elif role:
+    status["members_count"] = 1
+    status["shards"] = 1
+    status["cluster_state"] = "standalone"
+
+json.dump(status, fp=sys.stdout)

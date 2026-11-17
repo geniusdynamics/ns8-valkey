@@ -1,19 +1,23 @@
 {
-  "name": "kickstart",
+  "name": "Valkey",
+  "upstream_name": "Valkey 9.1",
   "description": {
-    "en": "My kickstart module"
+    "en": "Valkey key-value store for other modules, standalone or as a highly available Valkey Cluster across nodes"
   },
-  "categories": [],
+  "categories": [
+    "development"
+  ],
   "authors": [
     {
-      "name": "Name Surname",
-      "email": "author@yourmail.org"
+      "name": "Genius Dynamics",
+      "email": "support@genius.africa"
     }
   ],
   "docs": {
-    "documentation_url": "https://docs.kickstart.com/",
-    "bug_url": "https://github.com/NethServer/dev",
-    "code_url": "https://github.com/author/ns8-kickstart"
+    "documentation_url": "https://github.com/geniusdynamics/ns8-valkey#readme",
+    "bug_url": "https://github.com/geniusdynamics/ns8-valkey/issues",
+    "code_url": "https://github.com/geniusdynamics/ns8-valkey",
+    "relnotes_url": "https://github.com/geniusdynamics/ns8-valkey/releases"
   },
-  "source": "ghcr.io/nethserver/kickstart"
+  "source": "ghcr.io/geniusdynamics/valkey"
 }

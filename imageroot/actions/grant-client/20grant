@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# Create or update the Valkey ACL user of a client and return its
+# credentials (role valkeyclient). Every call rotates the password. Only
+# its SHA-256 is stored in Valkey; the clear password exists only in this
+# output, which goes to the caller and is never logged.
+#
+
+import json
+import sys
+import agent
+import valkey_ns8 as vk
+
+data = json.load(sys.stdin)
+if not vk.role():
+    vk.validation_error("", "", "not_configured")
+client_id = vk.resolve_client_id(data)
+key_prefix = data.get("key_prefix") or ""
+if not vk.KEY_PREFIX_RE.match(key_prefix):
+    vk.validation_error("key_prefix", key_prefix, "invalid")
+
+username = vk.client_username(client_id)
+password = vk.new_password()
+rules = vk.client_rules(vk.sha256(password), key_prefix)
+
+
+def setuser(conn):
+    conn.execute_command("ACL", "SETUSER", username, *rules)
+    vk.save_acl(conn)
+
+
+ok, failed = vk.for_each_process(setuser)
+if not ok:
+    print(agent.SD_ERR + f"Cannot create the Valkey user {username}: no process answered", file=sys.stderr)
+    sys.exit(1)
+if failed:
+    print(agent.SD_WARNING + f"User {username} not created on {', '.join(failed)}: "
+          "copied from the other members when they start", file=sys.stderr)
+print(f"Valkey user {username} granted on {len(ok)} processes", file=sys.stderr)
+
+nodes = vk.client_endpoints()
+json.dump({
+    "client_id": client_id,
+    "username": username,
+    "password": password,
+    "ha_mode": vk.ha_mode(),
+    "cluster": vk.is_cluster(),
+    "cluster_id": vk.cluster_id(),
+    "nodes": nodes,
+    "urls": [f"redis://{n['host']}:{n['port']}" for n in nodes],
+    "tls": False,
+    "key_prefix": key_prefix,
+}, fp=sys.stdout)

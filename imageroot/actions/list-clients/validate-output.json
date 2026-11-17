@@ -1,0 +1,21 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Valkey clients",
+    "$id": "http://nethserver.org/json-schema/task/output/valkey/list-clients",
+    "type": "object",
+    "required": ["clients"],
+    "properties": {
+        "clients": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["client_id", "username", "key_prefix"],
+                "properties": {
+                    "client_id": {"type": "string"},
+                    "username": {"type": "string"},
+                    "key_prefix": {"type": "string"}
+                }
+            }
+        }
+    }
+}

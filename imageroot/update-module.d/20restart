@@ -1,15 +1,41 @@
-#!/bin/bash
+#!/usr/bin/env python3
 
 #
-# Copyright (C) 2023 Nethesis S.r.l.
+# Copyright (C) 2026 Genius Dynamics
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-# If the control reaches this step, the service can be enabled and started
+#
+# Rolling restart after an update. In a cluster one member restarts at a
+# time (a lock key in Valkey): its primaries first hand their slots to
+# their replicas on other members (graceful failover, no data loss), then
+# it restarts and waits until its replicas are in sync again. The
+# coordinator moves the primaries back afterwards.
+#
 
-set -e
+import sys
+import agent
+import valkey_ns8 as vk
 
-# Redirect any output to the journal (stderr)
-exec 1>&2
+if not vk.role():
+    sys.exit(0)
 
-systemctl --user try-restart kickstart.service
+units = ["valkey.service"] + (["valkey-replica.service"] if vk.is_cluster() else [])
+if not vk.is_cluster():
+    agent.run_helper("systemctl", "--user", "try-restart", *units)
+    sys.exit(0)
+
+module_id = vk.env("MODULE_ID")
+member_list = vk.members()
+client = vk.cluster_client(member_list)
+if not vk.acquire_restart_lock(client, module_id):
+    vk.warning("Another member is still restarting: restarting anyway")
+try:
+    vk.handover(member_list, module_id)
+    agent.run_helper("systemctl", "--user", "try-restart", *units)
+    for proc in vk.PROCS:
+        vk.wait_ready(proc, timeout=300)
+        if not vk.wait_replication(proc):
+            vk.warning(f"The {proc} process is not in sync yet")
+finally:
+    vk.release_restart_lock(client, module_id)
